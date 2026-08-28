@@ -1,0 +1,134 @@
+# Money Machine
+
+Money Machine is an auditable autonomous options agent for the Alpaca AI Trading Agents Hackathon, Options Alpha Agents track. It observes a paper account and liquid index options through Alpaca MCP Server V2, compiles only defined-risk structures, lets a structured model choose among candidate IDs or abstain, applies deterministic risk policy, reconciles broker state, and publishes a Decision Passport.
+
+The application is built to fail closed. A missing quote, invalid model response, stale chain, account mismatch, live endpoint, unexplained position, kill switch, time cutoff, or risk-cap breach prevents a new entry. Competition execution is additionally blocked by a version-controlled go-live latch until the owner explicitly authorizes it after acceptance passes.
+
+> Educational paper-trading software only. Options involve substantial risk. Replay and counterfactual results are hypothetical and are never labeled as official competition P&L.
+
+## What judges can see in 30 seconds
+
+The dashboard leads with paper equity, execution state, current defined risk, the latest constrained model decision, the risk-budget auction, every hard policy check, and the resulting order or abstention. Opening the Decision Passport joins the Alpaca-sourced evidence, alternatives, selection, risk decision, execution, reconciliation state, and outcome under one audit hash.
+
+## Architecture
+
+```text
+Alpaca MCP V2 ──> explicit adapter ──> deterministic candidate compiler
+       │                                      │
+       ├── account / clock / market data      ├── index iron condors
+       ├── options chains / quotes            └── directional debit spreads
+       └── orders / fills / positions / history         │
+                                                        v
+                                              risk-budget auction
+                                                        │
+                                              structured model choice
+                                                        │
+                                              deterministic risk policy
+                                                        │
+                                              idempotent limit execution
+                                                        │
+                                       stale cancel/reprice + deadline closes
+                                                        │
+                                              SQL audit ledger + Passport
+```
+
+The domain layer in `src/money_machine/domain` has no FastAPI, MCP, OpenAI, or SQLAlchemy dependency. Transport, model, clock, and persistence boundaries are explicit. Replay and live cycles call the same orchestration and risk code.
+
+More detail: [Architecture](docs/ARCHITECTURE.md), [MCP decision](docs/adr/0001-alpaca-mcp-v2.md), and [execution authority](docs/adr/0002-execution-authority.md).
+
+## Safe local setup
+
+Requirements: Python 3.12. Docker is optional.
+
+```bash
+make install
+make migrate
+make verify
+make replay
+make serve
+```
+
+Open <http://127.0.0.1:8000>. Replay mode requires no API keys and seeds the canonical, explicitly non-official demonstration cycle.
+
+To use a development paper account, copy `.env.example` to `.env.development.local`, fill the three Alpaca credential/identity fields, and restrict the file:
+
+```bash
+chmod 600 .env.development.local
+.venv/bin/money-machine --env-file .env.development.local mcp-read-check
+```
+
+Commands report credentials only as present or missing. They never print account IDs or secret values. `.env*.local` files are ignored by Git and Docker.
+
+## Commands
+
+```bash
+# Apply Alembic migrations
+.venv/bin/money-machine db upgrade
+
+# Run the offline end-to-end cycle
+.venv/bin/money-machine replay
+
+# Start dashboard
+.venv/bin/money-machine serve --host 127.0.0.1 --port 8000
+
+# Safe Alpaca V2 read verification for the selected role
+.venv/bin/money-machine --env-file .env.development.local mcp-read-check
+
+# Read-only competition acceptance report (exits 2 while blocked)
+.venv/bin/money-machine --env-file .env.competition.local acceptance
+
+# Persistent entry kill switch; cancel/close authority is unaffected
+.venv/bin/money-machine kill-switch on
+.venv/bin/money-machine kill-switch status
+
+# Single guarded scheduler cycle, useful for operations checks
+.venv/bin/money-machine --env-file .env.development.local scheduler --once
+```
+
+There is intentionally no `EXECUTION_ENABLED` flag. New-entry authority is derived from the fixed competition clock, verified account role, persistent kill switch, clean reconciliation, acceptance evidence, and the version-controlled go-live latch.
+
+## Testing and quality
+
+```bash
+.venv/bin/pytest
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .
+.venv/bin/mypy
+```
+
+Development MCP integration tests skip automatically when `.env.development.local` is absent:
+
+```bash
+.venv/bin/pytest -m integration
+```
+
+The suite boundary-tests one second before, exactly at, and one second after all five competition deadlines. It also covers account isolation, invalid model fallback, option geometry, every portfolio stop, correlated exposure, duplicate suppression, kill-switch persistence, stale/incomplete data, bounded repricing, reconciliation failures, and replay-to-Passport generation.
+
+Live health is evidence-based: database connectivity, the last successful Alpaca MCP cycle, scheduler heartbeat freshness, and reconciliation state are reported separately. A merely configured MCP command is not reported as connected.
+
+## Docker and Render
+
+Build locally:
+
+```bash
+docker build -t money-machine .
+docker run --rm -p 8000:8000 -e RUN_MODE=replay money-machine
+# Or start the replay dashboard plus PostgreSQL:
+docker compose up --build
+```
+
+`render.yaml` defines a public dashboard, one scheduler worker, and PostgreSQL. Both services use the same image; the scheduler also holds a database lease, so accidental duplicate workers cannot create duplicate cycles or orders. Render prompts for Alpaca and OpenAI secrets through `sync: false`; none are stored in the Blueprint.
+
+## Safety posture
+
+- Alpaca paper endpoint only; live URLs and lookalikes are rejected.
+- Credentials select an account; `ALPACA_EXPECTED_ACCOUNT_ID` only verifies it.
+- Production maps only to the competition role; development only to development.
+- The model cannot set strikes, quantity, endpoint, account, order class, or price semantics.
+- Structures use one underlying, one expiry, equal leg ratios, and bounded long wings.
+- Multi-leg entries are day limit orders with deterministic client IDs.
+- Stale entries are canceled and can be replaced only twice within a fixed concession budget.
+- New entries stop at the immutable cutoff; short-volatility and final flatten deadlines submit close-only multi-leg orders, and close authority persists until flat.
+- Counterfactual and replay data are visually and structurally separate from official P&L.
+
+See [SECURITY.md](SECURITY.md) for incident handling and disclosure.

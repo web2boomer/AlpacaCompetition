@@ -1,0 +1,105 @@
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+services:
+  - type: web
+    name: money-machine-dashboard
+    runtime: docker
+    plan: starter
+    region: ohio
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: money-machine serve --host 0.0.0.0 --port 8000
+    preDeployCommand: money-machine db upgrade
+    healthCheckPath: /api/health
+    autoDeployTrigger: checksPass
+    maxShutdownDelaySeconds: 30
+    numInstances: 1
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: money-machine-db
+          property: connectionString
+      - key: APP_ENV
+        value: production
+      - key: ACCOUNT_ROLE
+        value: competition
+      - key: RUN_MODE
+        value: live
+      - key: ALPACA_PAPER_TRADE
+        value: "true"
+      - key: ALPACA_TOOLSETS
+        value: account,trading,assets,stock-data,options-data,news
+      - key: APCA_API_BASE_URL
+        value: https://paper-api.alpaca.markets
+      - key: CLIENT_ORDER_PREFIX
+        value: mm-comp
+      - key: MODEL_PROVIDER
+        value: openai
+      - key: OPENAI_MODEL
+        value: gpt-5.6
+      - key: MCP_COMMAND
+        value: alpaca-mcp-server
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: ALPACA_EXPECTED_ACCOUNT_ID
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+
+  - type: worker
+    name: money-machine-scheduler
+    runtime: docker
+    plan: starter
+    region: ohio
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: money-machine scheduler
+    autoDeployTrigger: checksPass
+    maxShutdownDelaySeconds: 60
+    numInstances: 1
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: money-machine-db
+          property: connectionString
+      - key: APP_ENV
+        value: production
+      - key: ACCOUNT_ROLE
+        value: competition
+      - key: RUN_MODE
+        value: live
+      - key: ALPACA_PAPER_TRADE
+        value: "true"
+      - key: ALPACA_TOOLSETS
+        value: account,trading,assets,stock-data,options-data,news
+      - key: APCA_API_BASE_URL
+        value: https://paper-api.alpaca.markets
+      - key: CLIENT_ORDER_PREFIX
+        value: mm-comp
+      - key: MODEL_PROVIDER
+        value: openai
+      - key: OPENAI_MODEL
+        value: gpt-5.6
+      - key: MCP_COMMAND
+        value: alpaca-mcp-server
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: ALPACA_EXPECTED_ACCOUNT_ID
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+
+databases:
+  - name: money-machine-db
+    databaseName: money_machine
+    user: money_machine
+    plan: basic-256mb
+    region: ohio
+    postgresMajorVersion: "17"
+    storageAutoscalingEnabled: true
+
+previews:
+  generation: off
