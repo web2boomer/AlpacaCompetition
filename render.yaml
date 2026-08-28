@@ -3,6 +3,37 @@ projects:
   - name: money-machine
     environments:
       - name: production
+        envVarGroups:
+          - name: Money Machine
+            envVars:
+              - key: APP_ENV
+                value: production
+              - key: ACCOUNT_ROLE
+                value: competition
+              - key: RUN_MODE
+                value: live
+              - key: ALPACA_PAPER_TRADE
+                value: "true"
+              - key: ALPACA_TOOLSETS
+                value: account,trading,assets,stock-data,options-data,news
+              - key: APCA_API_BASE_URL
+                value: https://paper-api.alpaca.markets
+              - key: CLIENT_ORDER_PREFIX
+                value: mm-comp
+              - key: MODEL_PROVIDER
+                value: deterministic
+              - key: MCP_COMMAND
+                value: alpaca-mcp-server
+              - key: ALPACA_API_KEY
+                value: ""
+              - key: ALPACA_SECRET_KEY
+                value: ""
+              - key: ALPACA_EXPECTED_ACCOUNT_ID
+                value: ""
+              - key: OPENAI_API_KEY
+                value: ""
+              - key: OPENAI_MODEL
+                value: gpt-5.6
         services:
           - type: web
             name: money-machine-dashboard
@@ -22,30 +53,7 @@ projects:
                 fromDatabase:
                   name: money-machine-db
                   property: connectionString
-              - key: APP_ENV
-                value: production
-              - key: ACCOUNT_ROLE
-                value: competition
-              - key: RUN_MODE
-                value: live
-              - key: ALPACA_PAPER_TRADE
-                value: "true"
-              - key: ALPACA_TOOLSETS
-                value: account,trading,assets,stock-data,options-data,news
-              - key: APCA_API_BASE_URL
-                value: https://paper-api.alpaca.markets
-              - key: CLIENT_ORDER_PREFIX
-                value: mm-comp
-              - key: MODEL_PROVIDER
-                value: deterministic
-              - key: MCP_COMMAND
-                value: alpaca-mcp-server
-              - key: ALPACA_API_KEY
-                sync: false
-              - key: ALPACA_SECRET_KEY
-                sync: false
-              - key: ALPACA_EXPECTED_ACCOUNT_ID
-                sync: false
+              - fromGroup: Money Machine
 
           - type: worker
             name: money-machine-scheduler
@@ -63,30 +71,7 @@ projects:
                 fromDatabase:
                   name: money-machine-db
                   property: connectionString
-              - key: APP_ENV
-                value: production
-              - key: ACCOUNT_ROLE
-                value: competition
-              - key: RUN_MODE
-                value: live
-              - key: ALPACA_PAPER_TRADE
-                value: "true"
-              - key: ALPACA_TOOLSETS
-                value: account,trading,assets,stock-data,options-data,news
-              - key: APCA_API_BASE_URL
-                value: https://paper-api.alpaca.markets
-              - key: CLIENT_ORDER_PREFIX
-                value: mm-comp
-              - key: MODEL_PROVIDER
-                value: deterministic
-              - key: MCP_COMMAND
-                value: alpaca-mcp-server
-              - key: ALPACA_API_KEY
-                sync: false
-              - key: ALPACA_SECRET_KEY
-                sync: false
-              - key: ALPACA_EXPECTED_ACCOUNT_ID
-                sync: false
+              - fromGroup: Money Machine
 
         databases:
           - name: money-machine-db

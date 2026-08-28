@@ -15,7 +15,7 @@ from money_machine.development_acceptance import run_development_round_trip
 from money_machine.domain.enums import RunMode
 from money_machine.logging_config import configure_logging
 from money_machine.model_provider import ReplayModelProvider
-from money_machine.persistence.database import Database
+from money_machine.persistence.database import Database, normalize_database_url
 from money_machine.persistence.repository import AuditRepository
 from money_machine.scheduler import run_scheduler
 from money_machine.service import AgentService
@@ -149,7 +149,8 @@ async def _development_round_trip(
 def _migration(action: str, database_url: str) -> None:
     project_root = Path(__file__).resolve().parents[2]
     config = Config(str(project_root / "alembic.ini"))
-    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+    normalized_url = normalize_database_url(database_url)
+    config.set_main_option("sqlalchemy.url", normalized_url.replace("%", "%%"))
     if action == "upgrade":
         command.upgrade(config, "head")
     else:

@@ -7,11 +7,21 @@ from sqlalchemy.orm import Session, sessionmaker
 from money_machine.persistence.models import Base
 
 
+def normalize_database_url(url: str) -> str:
+    """Select the installed Psycopg 3 driver for Render-style Postgres URLs."""
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+psycopg://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return url
+
+
 class Database:
     def __init__(self, url: str) -> None:
-        connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-        self.engine = create_engine(url, pool_pre_ping=True, connect_args=connect_args)
-        if url.startswith("sqlite"):
+        normalized_url = normalize_database_url(url)
+        connect_args = {"check_same_thread": False} if normalized_url.startswith("sqlite") else {}
+        self.engine = create_engine(normalized_url, pool_pre_ping=True, connect_args=connect_args)
+        if normalized_url.startswith("sqlite"):
             event.listen(self.engine, "connect", _sqlite_pragmas)
         self.session_factory = sessionmaker(self.engine, expire_on_commit=False)
 
