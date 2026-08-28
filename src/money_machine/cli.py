@@ -147,8 +147,10 @@ async def _development_round_trip(
 
 
 def _migration(action: str, database_url: str) -> None:
-    project_root = Path(__file__).resolve().parents[2]
-    config = Config(str(project_root / "alembic.ini"))
+    config_path = Path.cwd() / "alembic.ini"
+    if not config_path.is_file():
+        config_path = Path(__file__).resolve().parents[2] / "alembic.ini"
+    config = Config(str(config_path))
     normalized_url = normalize_database_url(database_url)
     config.set_main_option("sqlalchemy.url", normalized_url.replace("%", "%%"))
     if action == "upgrade":
