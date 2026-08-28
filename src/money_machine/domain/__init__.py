@@ -1,0 +1,1 @@
+"""Transport-independent trading domain."""

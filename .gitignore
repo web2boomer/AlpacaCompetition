@@ -20,6 +20,10 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
+money_machine.db
+money_machine.db-*
 
 # Node
 node_modules/

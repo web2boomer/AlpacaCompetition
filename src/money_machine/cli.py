@@ -1,0 +1,135 @@
+import argparse
+import asyncio
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from alembic import command
+from alembic.config import Config
+
+from money_machine.acceptance import run_production_acceptance
+from money_machine.adapters.alpaca_mcp import AlpacaMcpV2Adapter
+from money_machine.adapters.replay import ReplayAlpacaAdapter
+from money_machine.domain.enums import RunMode
+from money_machine.logging_config import configure_logging
+from money_machine.model_provider import ReplayModelProvider
+from money_machine.persistence.database import Database
+from money_machine.persistence.repository import AuditRepository
+from money_machine.scheduler import run_scheduler
+from money_machine.service import AgentService
+from money_machine.settings import Settings, load_local_environment
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="money-machine")
+    parser.add_argument("--env-file", type=Path)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser("replay", help="run the canonical offline decision cycle")
+    serve = subparsers.add_parser("serve", help="serve the public dashboard")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", default=8000, type=int)
+    db = subparsers.add_parser("db", help="database migration commands")
+    db.add_argument("action", choices=["upgrade", "current"])
+    scheduler = subparsers.add_parser("scheduler", help="run the guarded five-minute loop")
+    scheduler.add_argument("--once", action="store_true")
+    subparsers.add_parser("acceptance", help="run read-only production acceptance checks")
+    subparsers.add_parser("mcp-read-check", help="verify guarded Alpaca MCP V2 reads")
+    kill = subparsers.add_parser("kill-switch", help="set the persistent entry kill switch")
+    kill.add_argument("state", choices=["on", "off", "status"])
+    args = parser.parse_args()
+    if args.env_file:
+        load_local_environment(args.env_file)
+    settings = Settings()
+    configure_logging(settings.log_level)
+    database = Database(settings.database_url)
+    repository = AuditRepository(database)
+
+    if args.command == "db":
+        _migration(args.action, settings.database_url)
+    elif args.command == "replay":
+        _migration("upgrade", settings.database_url)
+        _print_json(asyncio.run(_replay(settings, repository)))
+    elif args.command == "serve":
+        import uvicorn
+
+        from money_machine.web import create_app
+
+        uvicorn.run(create_app(settings, database), host=args.host, port=args.port)
+    elif args.command == "scheduler":
+        asyncio.run(run_scheduler(settings, repository, once=args.once))
+    elif args.command == "acceptance":
+        report = asyncio.run(run_production_acceptance(settings, database, repository))
+        _print_json(report.safe_dict())
+        if not report.passed:
+            raise SystemExit(2)
+    elif args.command == "mcp-read-check":
+        _print_json(asyncio.run(_mcp_read_check(settings)))
+    elif args.command == "kill-switch":
+        if args.state == "status":
+            _print_json(repository.latest_operational_state())
+        else:
+            repository.set_kill_switch(active=args.state == "on", now=datetime.now(UTC))
+            _print_json({"kill_switch": args.state, "persistent": True})
+
+
+async def _replay(settings: Settings, repository: AuditRepository) -> dict[str, Any]:
+    replay_settings = settings.model_copy(update={"run_mode": RunMode.REPLAY})
+    adapter = ReplayAlpacaAdapter()
+    outcome = await AgentService(replay_settings, repository).run_cycle(
+        adapter=adapter,
+        model=ReplayModelProvider(),
+        now=adapter.observed_at,
+        mode=RunMode.REPLAY,
+    )
+    return {
+        "run_id": outcome.run_id,
+        "created": outcome.created,
+        "approved": outcome.approved,
+        "order_submitted": outcome.order_submitted,
+        "result_label": outcome.passport.get("result_label"),
+    }
+
+
+async def _mcp_read_check(settings: Settings) -> dict[str, Any]:
+    settings.assert_live_credentials_present()
+    async with AlpacaMcpV2Adapter(settings) as adapter:
+        account = await adapter.account()
+        from money_machine.safety import verify_account_identity
+
+        verify_account_identity(settings, account)
+        results = await asyncio.gather(
+            adapter.market_clock(),
+            adapter.portfolio_history(),
+            adapter.underlying_snapshot("SPY"),
+            adapter.option_chain("SPY"),
+            adapter.activities(),
+        )
+    return {
+        "account_identity": "verified",
+        "paper_account": account.is_paper,
+        "market_clock": "passed" if results[0] else "failed",
+        "portfolio_history": "passed" if results[1] else "failed",
+        "stock_snapshot": "passed" if results[2] else "failed",
+        "option_chain": "passed" if results[3] else "failed",
+        "fill_activities": "passed",
+        "orders_submitted": 0,
+    }
+
+
+def _migration(action: str, database_url: str) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    config = Config(str(project_root / "alembic.ini"))
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+    if action == "upgrade":
+        command.upgrade(config, "head")
+    else:
+        command.current(config)
+
+
+def _print_json(payload: Any) -> None:
+    print(json.dumps(payload, indent=2, default=str))
+
+
+if __name__ == "__main__":
+    main()

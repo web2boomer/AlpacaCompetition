@@ -1,0 +1,86 @@
+{
+  "observed_at": "2026-08-28T15:05:00Z",
+  "account": {
+    "account_id": "REPLAY-PAPER-ACCOUNT",
+    "status": "ACTIVE",
+    "is_paper": true,
+    "equity": "100420.00",
+    "cash": "100420.00",
+    "buying_power": "200840.00",
+    "portfolio_value": "100420.00",
+    "realized_pl": "320.00",
+    "unrealized_pl": "100.00"
+  },
+  "market_clock": {
+    "timestamp": "2026-08-28T15:05:00Z",
+    "is_open": true,
+    "next_close": "2026-08-28T20:00:00Z"
+  },
+  "underlyings": [
+    {
+      "symbol": "SPY",
+      "spot": "769.90",
+      "previous_close": "771.18",
+      "realized_move_pct": "0.0120",
+      "implied_move_pct": "0.0208",
+      "trend_return_pct": "-0.0017",
+      "event_risk": false,
+      "observed_at": "2026-08-28T15:04:48Z"
+    },
+    {
+      "symbol": "QQQ",
+      "spot": "716.70",
+      "previous_close": "721.20",
+      "realized_move_pct": "0.0122",
+      "implied_move_pct": "0.0223",
+      "trend_return_pct": "-0.0062",
+      "event_risk": false,
+      "observed_at": "2026-08-28T15:04:47Z"
+    },
+    {
+      "symbol": "IWM",
+      "spot": "296.05",
+      "previous_close": "299.81",
+      "realized_move_pct": "0.0121",
+      "implied_move_pct": "0.0223",
+      "trend_return_pct": "-0.0125",
+      "event_risk": false,
+      "observed_at": "2026-08-28T15:04:46Z"
+    }
+  ],
+  "chains": {
+    "SPY": [
+      {"symbol":"SPY260904P00750000","underlying":"SPY","expiration":"2026-09-04T00:00:00Z","right":"put","strike":"750","bid":"1.35","ask":"1.45","volume":920,"open_interest":9100,"implied_volatility":"0.24","delta":"-0.14","observed_at":"2026-08-28T15:04:50Z"},
+      {"symbol":"SPY260904P00755000","underlying":"SPY","expiration":"2026-09-04T00:00:00Z","right":"put","strike":"755","bid":"1.85","ask":"1.95","volume":1280,"open_interest":12400,"implied_volatility":"0.23","delta":"-0.20","observed_at":"2026-08-28T15:04:51Z"},
+      {"symbol":"SPY260904P00770000","underlying":"SPY","expiration":"2026-09-04T00:00:00Z","right":"put","strike":"770","bid":"7.90","ask":"8.10","volume":3600,"open_interest":18400,"implied_volatility":"0.21","delta":"-0.50","observed_at":"2026-08-28T15:04:52Z"},
+      {"symbol":"SPY260904C00770000","underlying":"SPY","expiration":"2026-09-04T00:00:00Z","right":"call","strike":"770","bid":"7.90","ask":"8.10","volume":4100,"open_interest":20200,"implied_volatility":"0.21","delta":"0.50","observed_at":"2026-08-28T15:04:52Z"},
+      {"symbol":"SPY260904C00785000","underlying":"SPY","expiration":"2026-09-04T00:00:00Z","right":"call","strike":"785","bid":"1.75","ask":"1.85","volume":1410,"open_interest":13300,"implied_volatility":"0.22","delta":"0.19","observed_at":"2026-08-28T15:04:53Z"},
+      {"symbol":"SPY260904C00790000","underlying":"SPY","expiration":"2026-09-04T00:00:00Z","right":"call","strike":"790","bid":"1.25","ask":"1.35","volume":870,"open_interest":9800,"implied_volatility":"0.23","delta":"0.13","observed_at":"2026-08-28T15:04:54Z"}
+    ],
+    "QQQ": [
+      {"symbol":"QQQ260904P00695000","underlying":"QQQ","expiration":"2026-09-04T00:00:00Z","right":"put","strike":"695","bid":"1.20","ask":"1.30","volume":690,"open_interest":7200,"implied_volatility":"0.27","delta":"-0.13","observed_at":"2026-08-28T15:04:49Z"},
+      {"symbol":"QQQ260904P00700000","underlying":"QQQ","expiration":"2026-09-04T00:00:00Z","right":"put","strike":"700","bid":"1.70","ask":"1.80","volume":980,"open_interest":9600,"implied_volatility":"0.26","delta":"-0.19","observed_at":"2026-08-28T15:04:50Z"},
+      {"symbol":"QQQ260904P00715000","underlying":"QQQ","expiration":"2026-09-04T00:00:00Z","right":"put","strike":"715","bid":"7.75","ask":"7.95","volume":2100,"open_interest":14400,"implied_volatility":"0.24","delta":"-0.48","observed_at":"2026-08-28T15:04:51Z"},
+      {"symbol":"QQQ260904P00720000","underlying":"QQQ","expiration":"2026-09-04T00:00:00Z","right":"put","strike":"720","bid":"10.55","ask":"10.80","volume":1980,"open_interest":13900,"implied_volatility":"0.24","delta":"-0.57","observed_at":"2026-08-28T15:04:51Z"},
+      {"symbol":"QQQ260904C00715000","underlying":"QQQ","expiration":"2026-09-04T00:00:00Z","right":"call","strike":"715","bid":"8.05","ask":"8.25","volume":2360,"open_interest":15100,"implied_volatility":"0.24","delta":"0.52","observed_at":"2026-08-28T15:04:51Z"},
+      {"symbol":"QQQ260904C00735000","underlying":"QQQ","expiration":"2026-09-04T00:00:00Z","right":"call","strike":"735","bid":"1.55","ask":"1.65","volume":880,"open_interest":8400,"implied_volatility":"0.25","delta":"0.17","observed_at":"2026-08-28T15:04:52Z"},
+      {"symbol":"QQQ260904C00740000","underlying":"QQQ","expiration":"2026-09-04T00:00:00Z","right":"call","strike":"740","bid":"1.05","ask":"1.15","volume":610,"open_interest":6800,"implied_volatility":"0.26","delta":"0.11","observed_at":"2026-08-28T15:04:53Z"}
+    ],
+    "IWM": [
+      {"symbol":"IWM260904P00287000","underlying":"IWM","expiration":"2026-09-04T00:00:00Z","right":"put","strike":"287","bid":"0.70","ask":"0.78","volume":440,"open_interest":5100,"implied_volatility":"0.29","delta":"-0.15","observed_at":"2026-08-28T15:04:47Z"},
+      {"symbol":"IWM260904P00290000","underlying":"IWM","expiration":"2026-09-04T00:00:00Z","right":"put","strike":"290","bid":"1.05","ask":"1.13","volume":730,"open_interest":7400,"implied_volatility":"0.28","delta":"-0.22","observed_at":"2026-08-28T15:04:48Z"},
+      {"symbol":"IWM260904P00295000","underlying":"IWM","expiration":"2026-09-04T00:00:00Z","right":"put","strike":"295","bid":"3.15","ask":"3.30","volume":1120,"open_interest":9100,"implied_volatility":"0.27","delta":"-0.46","observed_at":"2026-08-28T15:04:49Z"},
+      {"symbol":"IWM260904C00295000","underlying":"IWM","expiration":"2026-09-04T00:00:00Z","right":"call","strike":"295","bid":"3.20","ask":"3.35","volume":1260,"open_interest":9800,"implied_volatility":"0.27","delta":"0.54","observed_at":"2026-08-28T15:04:49Z"},
+      {"symbol":"IWM260904C00303000","underlying":"IWM","expiration":"2026-09-04T00:00:00Z","right":"call","strike":"303","bid":"0.96","ask":"1.04","volume":660,"open_interest":6900,"implied_volatility":"0.28","delta":"0.20","observed_at":"2026-08-28T15:04:50Z"},
+      {"symbol":"IWM260904C00306000","underlying":"IWM","expiration":"2026-09-04T00:00:00Z","right":"call","strike":"306","bid":"0.59","ask":"0.67","volume":390,"open_interest":4700,"implied_volatility":"0.29","delta":"0.13","observed_at":"2026-08-28T15:04:51Z"}
+    ]
+  },
+  "orders": [],
+  "positions": [],
+  "portfolio_history": {
+    "timestamp": [1787929200, 1787929500, 1787929800, 1787930100],
+    "equity": [100000.0, 100120.0, 100260.0, 100420.0],
+    "profit_loss": [0.0, 120.0, 260.0, 420.0],
+    "official": false
+  }
+}

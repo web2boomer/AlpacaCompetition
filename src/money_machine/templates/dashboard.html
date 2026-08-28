@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Money Machine · Risk Budget Auction{% endblock %}
+{% block content %}
+{% set account = passport.get('account', {}) %}
+{% set state = passport.get('operational_state', {}) %}
+{% set decision = passport.get('decision', {}) %}
+{% set risk = passport.get('risk', {}) %}
+{% set execution = passport.get('execution', {}) %}
+<section class="hero shell">
+  <div class="eyebrow-row">
+    <span class="eyebrow">The volatility governor</span>
+    <span class="mode-badge">{{ passport.get('result_label', 'NO DATA') }}</span>
+  </div>
+  <div class="hero-grid">
+    <div>
+      <h1>Every trade has to <em>earn</em> its risk.</h1>
+      <p class="lede">Money Machine auctions a finite risk budget across safe, precompiled option structures. The model may choose. Policy has the final word.</p>
+      <div class="hero-actions">
+        {% if passport.get('run_id') %}<a class="button primary" href="/runs/{{ passport.run_id }}">Open latest Decision Passport <span>↗</span></a>{% endif %}
+        <form action="/replay" method="post"><button class="button secondary" type="submit">Replay canonical cycle</button></form>
+      </div>
+    </div>
+    <div class="equity-panel">
+      <div class="metric-label">Paper account equity</div>
+      <div class="equity-value">{{ account.get('equity', 0)|money }}</div>
+      <div class="equity-delta">+{{ account.get('pnl', 0)|money }} <span>from $100,000 baseline</span></div>
+      <svg class="equity-chart" viewBox="0 0 720 180" role="img" aria-label="Replay equity curve">
+        <defs><linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b8ff60" stop-opacity=".32"/><stop offset="1" stop-color="#b8ff60" stop-opacity="0"/></linearGradient></defs>
+        <path d="M 12 168 L {{ chart }} L 708 168 Z" fill="url(#area)"/>
+        <polyline points="{{ chart }}" fill="none" stroke="#b8ff60" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div class="chart-axis"><span>Competition start</span><span>Latest cycle</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="shell metric-grid" aria-label="Current agent metrics">
+  <article class="metric-card">
+    <div class="metric-label">Execution state</div>
+    <div class="metric-primary state"><i></i>{{ state.get('execution_state', 'observe_only')|replace('_', ' ') }}</div>
+    <p>{{ 'Reconciliation clean' if state.get('reconciliation_clean', True) else 'Entries halted by reconciliation' }}</p>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">Current decision</div>
+    <div class="metric-primary">{{ decision.get('action', 'abstain')|replace('_', ' ') }}</div>
+    <p>{{ (decision.get('confidence', 0) * 100)|round|int }}% constrained-model confidence</p>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">Awarded max risk</div>
+    <div class="metric-primary">{{ risk.get('awarded_risk', 0)|money }}</div>
+    <p>{{ risk.get('quantity', 0) }} contract{{ '' if risk.get('quantity', 0) == 1 else 's' }} · always rounded down</p>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">Order state</div>
+    <div class="metric-primary">{{ execution.get('status', 'not submitted')|replace('_', ' ') }}</div>
+    <p>{{ 'Multi-leg limit · idempotent' if execution.get('submitted') else 'Cash retained' }}</p>
+  </article>
+</section>
+
+<section class="shell two-col section-gap">
+  <article class="panel auction-panel">
+    <div class="panel-head">
+      <div><span class="kicker">01 · Risk-budget auction</span><h2>Alternatives competed. One survived.</h2></div>
+      <span class="decision-pill {{ 'approved' if risk.get('approved') else 'rejected' }}">{{ 'Approved' if risk.get('approved') else 'Cash won' }}</span>
+    </div>
+    <div class="auction-list">
+      {% for candidate in passport.get('candidates', []) %}
+      {% set selected = candidate.candidate_id == decision.get('candidate_id') %}
+      <div class="auction-row {{ 'selected' if selected }}">
+        <div class="rank">0{{ loop.index }}</div>
+        <div class="auction-copy">
+          <strong>{{ candidate.structure.underlying }} · {{ candidate.action|replace('_', ' ') }}</strong>
+          <span>Max loss {{ candidate.structure.maximum_loss|money }} · {{ candidate.richness_ratio|float|round(2) }}× move richness</span>
+        </div>
+        <div class="score"><span style="width: {{ [candidate.score|float / 2, 100]|min }}%"></span></div>
+        <div class="auction-result">{{ 'Selected' if selected else 'Alternative' }}</div>
+      </div>
+      {% else %}
+      <div class="empty">No structure passed the pre-auction gates. Abstention is a successful outcome.</div>
+      {% endfor %}
+    </div>
+  </article>
+
+  <article class="panel decision-panel">
+    <span class="kicker">02 · Constrained intelligence</span>
+    <h2>“{{ decision.get('thesis', 'No valid model decision was available.') }}”</h2>
+    <div class="confidence"><span style="width: {{ decision.get('confidence', 0) * 100 }}%"></span></div>
+    <div class="split-list">
+      <div><h3>Evidence</h3>{% for item in decision.get('evidence', []) %}<p><i>+</i>{{ item }}</p>{% endfor %}</div>
+      <div><h3>Invalidation</h3>{% for item in decision.get('invalidation', []) %}<p><i>×</i>{{ item }}</p>{% endfor %}</div>
+    </div>
+  </article>
+</section>
+
+<section class="shell panel section-gap guardrail-panel">
+  <div class="panel-head"><div><span class="kicker">03 · Deterministic policy</span><h2>Confidence never overrides a hard gate.</h2></div><span class="mono">{{ risk.get('checks', [])|length }} checks</span></div>
+  <div class="checks-grid">
+    {% for check in risk.get('checks', []) %}
+    <div class="check {{ 'pass' if check.passed else 'fail' }}"><span>{{ '✓' if check.passed else '×' }}</span><div><strong>{{ check.name|replace('_', ' ') }}</strong><small>{{ check.actual }} / {{ check.limit }}</small></div></div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="shell final-cta section-gap">
+  <div><span class="kicker">Decision Passport</span><h2>The whole story, joined end to end.</h2><p>Evidence, alternatives, model selection, policy checks, execution, reconciliation, and outcome—one audit hash.</p></div>
+  {% if passport.get('run_id') %}<a class="button primary" href="/runs/{{ passport.run_id }}">Inspect the audit trail <span>→</span></a>{% endif %}
+</section>
+{% endblock %}

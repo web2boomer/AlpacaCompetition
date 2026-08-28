@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Money Machine — an auditable defined-risk options agent">
+    <title>{% block title %}Money Machine{% endblock %}</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='16' fill='%2309100d'/%3E%3Ctext x='16' y='20' text-anchor='middle' font-size='10' fill='%23b8ff60'%3EMM%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+  </head>
+  <body>
+    <div class="grain"></div>
+    <header class="nav shell">
+      <a class="brand" href="/" aria-label="Money Machine home">
+        <span class="brand-mark">MM</span>
+        <span>Money Machine</span>
+      </a>
+      <div class="nav-meta">
+        <span class="pulse"><i></i> Autonomous paper agent</span>
+        <a href="/api/health">System health</a>
+      </div>
+    </header>
+    <main>{% block content %}{% endblock %}</main>
+    <footer class="shell footer">
+      <span>Defined risk. Deterministic guardrails. Auditable decisions.</span>
+      <span>Alpaca AI Trading Agents Hackathon · Options Alpha Agents</span>
+    </footer>
+  </body>
+</html>
