@@ -11,6 +11,7 @@ from alembic.config import Config
 from money_machine.acceptance import run_production_acceptance
 from money_machine.adapters.alpaca_mcp import AlpacaMcpV2Adapter
 from money_machine.adapters.replay import ReplayAlpacaAdapter
+from money_machine.development_acceptance import run_development_round_trip
 from money_machine.domain.enums import RunMode
 from money_machine.logging_config import configure_logging
 from money_machine.model_provider import ReplayModelProvider
@@ -35,6 +36,15 @@ def main() -> None:
     scheduler.add_argument("--once", action="store_true")
     subparsers.add_parser("acceptance", help="run read-only production acceptance checks")
     subparsers.add_parser("mcp-read-check", help="verify guarded Alpaca MCP V2 reads")
+    round_trip = subparsers.add_parser(
+        "development-round-trip",
+        help="open and close one bounded spread in the development paper account",
+    )
+    round_trip.add_argument(
+        "--confirm-paper-order",
+        action="store_true",
+        help="confirm that two real Alpaca paper orders may be submitted",
+    )
     kill = subparsers.add_parser("kill-switch", help="set the persistent entry kill switch")
     kill.add_argument("state", choices=["on", "off", "status"])
     args = parser.parse_args()
@@ -65,6 +75,11 @@ def main() -> None:
             raise SystemExit(2)
     elif args.command == "mcp-read-check":
         _print_json(asyncio.run(_mcp_read_check(settings)))
+    elif args.command == "development-round-trip":
+        if not args.confirm_paper_order:
+            raise SystemExit("development round trip requires --confirm-paper-order")
+        _migration("upgrade", settings.database_url)
+        _print_json(asyncio.run(_development_round_trip(settings, repository)))
     elif args.command == "kill-switch":
         if args.state == "status":
             _print_json(repository.latest_operational_state())
@@ -105,6 +120,9 @@ async def _mcp_read_check(settings: Settings) -> dict[str, Any]:
             adapter.option_chain("SPY"),
             adapter.activities(),
         )
+        open_orders, positions = await asyncio.gather(
+            adapter.orders(status="open"), adapter.positions()
+        )
     return {
         "account_identity": "verified",
         "paper_account": account.is_paper,
@@ -113,8 +131,19 @@ async def _mcp_read_check(settings: Settings) -> dict[str, Any]:
         "stock_snapshot": "passed" if results[2] else "failed",
         "option_chain": "passed" if results[3] else "failed",
         "fill_activities": "passed",
-        "orders_submitted": 0,
+        "open_orders": len(open_orders),
+        "open_positions": len(positions),
+        "orders_submitted_by_check": 0,
     }
+
+
+async def _development_round_trip(
+    settings: Settings, repository: AuditRepository
+) -> dict[str, Any]:
+    settings.assert_live_credentials_present()
+    async with AlpacaMcpV2Adapter(settings) as adapter:
+        report = await run_development_round_trip(settings, repository, adapter)
+    return report.safe_dict()
 
 
 def _migration(action: str, database_url: str) -> None:

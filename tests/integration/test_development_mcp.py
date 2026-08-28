@@ -10,9 +10,9 @@ from money_machine.settings import Settings, load_local_environment
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_development_mcp_authentication_and_reads() -> None:
-    env_file = Path(".env.development.local")
+    env_file = Path(".env.competition.local")
     if not env_file.exists():
-        pytest.skip(".env.development.local is missing")
+        pytest.skip(".env.competition.local is missing")
     load_local_environment(env_file)
     settings = Settings()
     if settings.account_role.value != "development":
@@ -24,9 +24,13 @@ async def test_development_mcp_authentication_and_reads() -> None:
         history = await adapter.portfolio_history()
         snapshot = await adapter.underlying_snapshot("SPY")
         chain = await adapter.option_chain("SPY")
+        open_orders = await adapter.orders(status="open")
+        positions = await adapter.positions()
     assert verification.verified
     assert account.is_paper
     assert clock
     assert history
     assert snapshot.spot > 0
     assert chain
+    assert not open_orders
+    assert not positions

@@ -24,6 +24,8 @@ venv/
 htmlcov/
 money_machine.db
 money_machine.db-*
+money_machine.development.db
+money_machine.development.db-*
 
 # Node
 node_modules/

@@ -156,7 +156,15 @@ class AlpacaMcpV2Adapter:
         )
 
     async def option_chain(self, symbol: str) -> list[OptionQuote]:
-        payload = await self.call_tool("get_option_chain", {"underlying_symbol": symbol})
+        payload = await self.call_tool(
+            "get_option_chain",
+            {
+                "underlying_symbol": symbol,
+                # The Alpaca endpoint defaults to 100 contracts, which is not a
+                # complete chain for liquid index ETFs and can omit both wings.
+                "limit": 1000,
+            },
+        )
         chain = _chain_payload(payload)
         quotes: list[OptionQuote] = []
         for option_symbol, raw_snapshot in chain.items():
@@ -196,6 +204,14 @@ class AlpacaMcpV2Adapter:
     async def orders(self, *, status: str = "open") -> list[dict[str, Any]]:
         payload = await self.call_tool("get_orders", {"status": status})
         return _as_list_of_dicts(payload)
+
+    async def order_by_id(self, broker_order_id: str) -> dict[str, Any]:
+        return _as_dict(
+            await self.call_tool(
+                "get_order_by_id",
+                {"order_id": broker_order_id, "nested": True},
+            )
+        )
 
     async def positions(self) -> list[dict[str, Any]]:
         return _as_list_of_dicts(await self.call_tool("get_all_positions"))

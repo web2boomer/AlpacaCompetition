@@ -414,6 +414,19 @@ class AuditRepository:
                 "last_success_at": last_success,
             }
 
+    def development_round_trip_verified(self) -> bool:
+        """Return only whether a completed paper execution round trip is audited."""
+        with self.database.session() as session:
+            count = session.scalar(
+                select(func.count())
+                .select_from(AgentRunORM)
+                .where(
+                    AgentRunORM.cycle_key.like("development-roundtrip:%"),
+                    AgentRunORM.status == "completed",
+                )
+            )
+            return bool(count and count > 0)
+
     def portfolio_risk_summary(self, fallback_equity: Decimal) -> dict[str, Any]:
         with self.database.session() as session:
             peak = session.scalar(select(func.max(EquitySnapshotORM.equity))) or fallback_equity

@@ -11,7 +11,7 @@
 - [x] Required audit entities and Decision Passport
 - [x] Judge-first public dashboard
 - [x] Canonical offline replay
-- [ ] Development-account round trip (blocked: development env file absent)
+- [x] Development-account paper round trip (opened, filled, closed, and returned flat)
 
 ## P1
 
@@ -26,9 +26,9 @@
 - [x] Evidence-based MCP/DB/reconciliation health, heartbeat state, structured logging, correlation IDs
 - [x] Read-only production acceptance command
 - [x] Docker and Render Blueprint
-- [ ] Live development MCP identity/read verification (blocked: development env file absent)
+- [x] Live development MCP identity/read verification
 - [x] Selected paper-account MCP V2 identity/read smoke check (zero orders submitted)
-- [ ] Production acceptance (blocked: supplied competition file is not mapped to the competition role; development round trip and go-live authorization also absent)
+- [ ] Production acceptance (blocked: Render secrets are pending and go-live remains unauthorized)
 - [ ] Competition execution (intentionally blocked pending explicit go-live)
 
 ## P2 (not allowed to delay safety)

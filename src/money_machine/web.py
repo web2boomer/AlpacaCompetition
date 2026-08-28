@@ -63,7 +63,12 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         return templates.TemplateResponse(
             request,
             "dashboard.html",
-            {"summary": summary, "passport": passport, "chart": chart},
+            {
+                "summary": summary,
+                "passport": passport,
+                "chart": chart,
+                "replay_enabled": app_settings.run_mode is RunMode.REPLAY,
+            },
         )
 
     @app.get("/runs/{run_id}", response_class=HTMLResponse)
@@ -75,6 +80,8 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
 
     @app.post("/replay")
     async def replay() -> RedirectResponse:
+        if app_settings.run_mode is not RunMode.REPLAY:
+            raise HTTPException(status_code=404, detail="Replay is disabled in live mode")
         adapter = ReplayAlpacaAdapter()
         outcome = await AgentService(app_settings, repository).run_cycle(
             adapter=adapter,

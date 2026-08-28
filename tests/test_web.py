@@ -21,6 +21,8 @@ def test_live_health_is_degraded_until_mcp_cycle_and_heartbeat(settings, databas
     live_settings = settings.model_copy(update={"run_mode": "live"})
     with TestClient(create_app(live_settings, database)) as client:
         health = client.get("/api/health")
+        replay = client.post("/replay")
     assert health.status_code == 503
     assert health.json()["alpaca_mcp"] == "unverified"
     assert health.json()["scheduler_heartbeat"] == "stale_or_missing"
+    assert replay.status_code == 404

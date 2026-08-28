@@ -50,11 +50,13 @@ make serve
 
 Open <http://127.0.0.1:8000>. Replay mode requires no API keys and seeds the canonical, explicitly non-official demonstration cycle.
 
-To use a development paper account, copy `.env.example` to `.env.development.local`, fill the three Alpaca credential/identity fields, and restrict the file:
+For this local development paper account, keep the role mapping inside the file set to
+`development` even though the owner-selected filename is `.env.competition.local`. Fill the
+three Alpaca credential/identity fields and restrict the file:
 
 ```bash
-chmod 600 .env.development.local
-.venv/bin/money-machine --env-file .env.development.local mcp-read-check
+chmod 600 .env.competition.local
+.venv/bin/money-machine --env-file .env.competition.local mcp-read-check
 ```
 
 Commands report credentials only as present or missing. They never print account IDs or secret values. `.env*.local` files are ignored by Git and Docker.
@@ -72,9 +74,12 @@ Commands report credentials only as present or missing. They never print account
 .venv/bin/money-machine serve --host 127.0.0.1 --port 8000
 
 # Safe Alpaca V2 read verification for the selected role
-.venv/bin/money-machine --env-file .env.development.local mcp-read-check
+.venv/bin/money-machine --env-file .env.competition.local mcp-read-check
 
-# Read-only competition acceptance report (exits 2 while blocked)
+# Explicitly authorized development-only order acceptance: opens and closes one bounded spread
+.venv/bin/money-machine --env-file .env.competition.local development-round-trip --confirm-paper-order
+
+# Read-only competition acceptance report (requires production/competition values)
 .venv/bin/money-machine --env-file .env.competition.local acceptance
 
 # Persistent entry kill switch; cancel/close authority is unaffected
@@ -82,8 +87,16 @@ Commands report credentials only as present or missing. They never print account
 .venv/bin/money-machine kill-switch status
 
 # Single guarded scheduler cycle, useful for operations checks
-.venv/bin/money-machine --env-file .env.development.local scheduler --once
+.venv/bin/money-machine --env-file .env.competition.local scheduler --once
+
+# Run the real local development instance (dashboard and scheduler use one live audit DB)
+DATABASE_URL=sqlite:///./money_machine.development.db RUN_MODE=live \
+  .venv/bin/money-machine --env-file .env.competition.local serve --host 127.0.0.1 --port 8000
+DATABASE_URL=sqlite:///./money_machine.development.db RUN_MODE=live \
+  .venv/bin/money-machine --env-file .env.competition.local scheduler
 ```
+
+The replay endpoint and dashboard control are disabled whenever `RUN_MODE=live`.
 
 There is intentionally no `EXECUTION_ENABLED` flag. New-entry authority is derived from the fixed competition clock, verified account role, persistent kill switch, clean reconciliation, acceptance evidence, and the version-controlled go-live latch.
 
@@ -96,7 +109,7 @@ There is intentionally no `EXECUTION_ENABLED` flag. New-entry authority is deriv
 .venv/bin/mypy
 ```
 
-Development MCP integration tests skip automatically when `.env.development.local` is absent:
+Development MCP integration tests skip automatically when `.env.competition.local` is absent:
 
 ```bash
 .venv/bin/pytest -m integration
@@ -117,7 +130,12 @@ docker run --rm -p 8000:8000 -e RUN_MODE=replay money-machine
 docker compose up --build
 ```
 
-`render.yaml` defines a public dashboard, one scheduler worker, and PostgreSQL. Both services use the same image; the scheduler also holds a database lease, so accidental duplicate workers cannot create duplicate cycles or orders. Render prompts for Alpaca and OpenAI secrets through `sync: false`; none are stored in the Blueprint.
+`render.yaml` defines one `money-machine` Render Project with a `production` Environment
+containing a public dashboard, one scheduler worker, and PostgreSQL. Both services use the
+same image; the scheduler also holds a database lease, so accidental duplicate workers cannot
+create duplicate cycles or orders. Render prompts for Alpaca and OpenAI secrets through
+`sync: false`; none are stored in the Blueprint. The production-capable Blueprint uses Starter
+services and a Basic database, so review Render pricing before applying it.
 
 ## Safety posture
 

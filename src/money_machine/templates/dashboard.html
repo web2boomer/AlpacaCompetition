@@ -17,14 +17,14 @@
       <p class="lede">Money Machine auctions a finite risk budget across safe, precompiled option structures. The model may choose. Policy has the final word.</p>
       <div class="hero-actions">
         {% if passport.get('run_id') %}<a class="button primary" href="/runs/{{ passport.run_id }}">Open latest Decision Passport <span>↗</span></a>{% endif %}
-        <form action="/replay" method="post"><button class="button secondary" type="submit">Replay canonical cycle</button></form>
+        {% if replay_enabled %}<form action="/replay" method="post"><button class="button secondary" type="submit">Replay canonical cycle</button></form>{% endif %}
       </div>
     </div>
     <div class="equity-panel">
       <div class="metric-label">Paper account equity</div>
       <div class="equity-value">{{ account.get('equity', 0)|money }}</div>
       <div class="equity-delta">+{{ account.get('pnl', 0)|money }} <span>from $100,000 baseline</span></div>
-      <svg class="equity-chart" viewBox="0 0 720 180" role="img" aria-label="Replay equity curve">
+      <svg class="equity-chart" viewBox="0 0 720 180" role="img" aria-label="Paper-account equity curve">
         <defs><linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b8ff60" stop-opacity=".32"/><stop offset="1" stop-color="#b8ff60" stop-opacity="0"/></linearGradient></defs>
         <path d="M 12 168 L {{ chart }} L 708 168 Z" fill="url(#area)"/>
         <polyline points="{{ chart }}" fill="none" stroke="#b8ff60" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>

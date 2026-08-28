@@ -203,7 +203,7 @@ async def run_production_acceptance(
     )
     add(
         "development_round_trip",
-        False,
+        repository.development_round_trip_verified(),
         "verified",
         "no development-account round-trip evidence recorded",
     )

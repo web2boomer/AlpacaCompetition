@@ -42,6 +42,20 @@ class ReplayAlpacaAdapter:
         del status
         return list(self.data.get("orders", []))
 
+    async def order_by_id(self, broker_order_id: str) -> dict[str, Any]:
+        result = next(
+            (order for order in self.submitted_orders if order.broker_order_id == broker_order_id),
+            None,
+        )
+        if result is None:
+            return {}
+        return {
+            "id": result.broker_order_id,
+            "client_order_id": result.client_order_id,
+            "status": result.status,
+            "submitted_at": result.submitted_at.isoformat(),
+        }
+
     async def positions(self) -> list[dict[str, Any]]:
         return list(self.data.get("positions", []))
 
