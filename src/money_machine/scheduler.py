@@ -9,7 +9,7 @@ import structlog
 
 from money_machine.adapters.alpaca_mcp import AlpacaMcpV2Adapter
 from money_machine.domain.enums import RunMode
-from money_machine.model_provider import OpenAIModelProvider, ReplayModelProvider
+from money_machine.model_provider import DeterministicModelProvider, OpenAIModelProvider
 from money_machine.persistence.repository import AuditRepository
 from money_machine.ports import ModelProvider
 from money_machine.service import AgentService
@@ -66,4 +66,6 @@ def _model(settings: Settings) -> ModelProvider:
         return OpenAIModelProvider(
             api_key=settings.openai_api_key.get_secret_value(), model=settings.openai_model
         )
-    return ReplayModelProvider()
+    if settings.model_provider in {"deterministic", "replay"}:
+        return DeterministicModelProvider()
+    raise ValueError(f"unsupported MODEL_PROVIDER: {settings.model_provider}")

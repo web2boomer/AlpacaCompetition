@@ -37,9 +37,7 @@ projects:
               - key: CLIENT_ORDER_PREFIX
                 value: mm-comp
               - key: MODEL_PROVIDER
-                value: openai
-              - key: OPENAI_MODEL
-                value: gpt-5.6
+                value: deterministic
               - key: MCP_COMMAND
                 value: alpaca-mcp-server
               - key: ALPACA_API_KEY
@@ -47,8 +45,6 @@ projects:
               - key: ALPACA_SECRET_KEY
                 sync: false
               - key: ALPACA_EXPECTED_ACCOUNT_ID
-                sync: false
-              - key: OPENAI_API_KEY
                 sync: false
 
           - type: worker
@@ -82,9 +78,7 @@ projects:
               - key: CLIENT_ORDER_PREFIX
                 value: mm-comp
               - key: MODEL_PROVIDER
-                value: openai
-              - key: OPENAI_MODEL
-                value: gpt-5.6
+                value: deterministic
               - key: MCP_COMMAND
                 value: alpaca-mcp-server
               - key: ALPACA_API_KEY
@@ -92,8 +86,6 @@ projects:
               - key: ALPACA_SECRET_KEY
                 sync: false
               - key: ALPACA_EXPECTED_ACCOUNT_ID
-                sync: false
-              - key: OPENAI_API_KEY
                 sync: false
 
         databases:

@@ -28,7 +28,7 @@ def safe_model_decision(payload: Any) -> ModelDecisionEnvelope:
         )
 
 
-class ReplayModelProvider:
+class DeterministicModelProvider:
     def __init__(self, scripted_payload: dict[str, Any] | None = None) -> None:
         self.scripted_payload = scripted_payload
 
@@ -71,7 +71,7 @@ class ReplayModelProvider:
                 "candidate_id": selected.candidate_id,
                 "confidence": 0.84,
                 "thesis": (
-                    "The highest-ranked eligible structure best fits the replay regime "
+                    "The highest-ranked eligible structure best fits the current regime "
                     "and finite risk budget."
                 ),
                 "evidence": list(selected.gate_evidence[:3]),
@@ -82,6 +82,10 @@ class ReplayModelProvider:
                 "maximum_holding_minutes": 360,
             }
         )
+
+
+class ReplayModelProvider(DeterministicModelProvider):
+    """Offline replay name retained for fixtures and explicit replay mode."""
 
 
 class OpenAIModelProvider:

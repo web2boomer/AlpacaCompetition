@@ -68,6 +68,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
                 "passport": passport,
                 "chart": chart,
                 "replay_enabled": app_settings.run_mode is RunMode.REPLAY,
+                "refreshed_at": datetime.now(UTC).isoformat(),
             },
         )
 

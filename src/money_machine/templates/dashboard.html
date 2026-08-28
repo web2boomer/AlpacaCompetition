@@ -13,11 +13,12 @@
   </div>
   <div class="hero-grid">
     <div>
-      <h1>Every trade has to <em>earn</em> its risk.</h1>
-      <p class="lede">Money Machine auctions a finite risk budget across safe, precompiled option structures. The model may choose. Policy has the final word.</p>
+      <h1>Every trade <em>earns</em> its risk.</h1>
+      <p class="lede">Defined-risk options compete for a fixed budget. Policy can always choose cash.</p>
       <div class="hero-actions">
         {% if passport.get('run_id') %}<a class="button primary" href="/runs/{{ passport.run_id }}">Open latest Decision Passport <span>↗</span></a>{% endif %}
         {% if replay_enabled %}<form action="/replay" method="post"><button class="button secondary" type="submit">Replay canonical cycle</button></form>{% endif %}
+        <span class="mono">Last refreshed <time id="last-refreshed" datetime="{{ refreshed_at }}">{{ refreshed_at }}</time></span>
       </div>
     </div>
     <div class="equity-panel">
@@ -60,7 +61,7 @@
 <section class="shell two-col section-gap">
   <article class="panel auction-panel">
     <div class="panel-head">
-      <div><span class="kicker">01 · Risk-budget auction</span><h2>Alternatives competed. One survived.</h2></div>
+      <div><span class="kicker">01 · Risk auction</span><h2>One structure—or cash.</h2></div>
       <span class="decision-pill {{ 'approved' if risk.get('approved') else 'rejected' }}">{{ 'Approved' if risk.get('approved') else 'Cash won' }}</span>
     </div>
     <div class="auction-list">
@@ -93,7 +94,7 @@
 </section>
 
 <section class="shell panel section-gap guardrail-panel">
-  <div class="panel-head"><div><span class="kicker">03 · Deterministic policy</span><h2>Confidence never overrides a hard gate.</h2></div><span class="mono">{{ risk.get('checks', [])|length }} checks</span></div>
+  <div class="panel-head"><div><span class="kicker">03 · Policy</span><h2>Hard gates outrank confidence.</h2></div><span class="mono">{{ risk.get('checks', [])|length }} checks</span></div>
   <div class="checks-grid">
     {% for check in risk.get('checks', []) %}
     <div class="check {{ 'pass' if check.passed else 'fail' }}"><span>{{ '✓' if check.passed else '×' }}</span><div><strong>{{ check.name|replace('_', ' ') }}</strong><small>{{ check.actual }} / {{ check.limit }}</small></div></div>
@@ -102,7 +103,23 @@
 </section>
 
 <section class="shell final-cta section-gap">
-  <div><span class="kicker">Decision Passport</span><h2>The whole story, joined end to end.</h2><p>Evidence, alternatives, model selection, policy checks, execution, reconciliation, and outcome—one audit hash.</p></div>
+  <div><span class="kicker">Decision Passport</span><h2>One audit trail.</h2><p>Evidence, decision, risk, execution, outcome.</p></div>
   {% if passport.get('run_id') %}<a class="button primary" href="/runs/{{ passport.run_id }}">Inspect the audit trail <span>→</span></a>{% endif %}
 </section>
+{% endblock %}
+{% block scripts %}
+<script>
+  (() => {
+    const refreshed = document.getElementById("last-refreshed");
+    if (refreshed) {
+      const timestamp = new Date(refreshed.dateTime);
+      refreshed.textContent = timestamp.toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+    }
+    window.setTimeout(() => window.location.reload(), 30000);
+  })();
+</script>
 {% endblock %}

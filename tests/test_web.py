@@ -9,7 +9,9 @@ def test_dashboard_and_health(settings, database) -> None:
         health = client.get("/api/health")
         passport = client.get("/api/passports/latest")
     assert response.status_code == 200
-    assert "Every trade has to" in response.text
+    assert "Every trade" in response.text
+    assert "Last refreshed" in response.text
+    assert "window.location.reload()" in response.text
     assert "REPLAY — NOT OFFICIAL P&amp;L" in response.text
     assert health.status_code == 200
     assert health.json()["database"] == "ok"

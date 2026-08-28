@@ -133,8 +133,10 @@ docker compose up --build
 `render.yaml` defines one `money-machine` Render Project with a `production` Environment
 containing a public dashboard, one scheduler worker, and PostgreSQL. Both services use the
 same image; the scheduler also holds a database lease, so accidental duplicate workers cannot
-create duplicate cycles or orders. Render prompts for Alpaca and OpenAI secrets through
-`sync: false`; none are stored in the Blueprint. The production-capable Blueprint uses Starter
+create duplicate cycles or orders. Render prompts for Alpaca secrets through `sync: false`;
+none are stored in the Blueprint. The initial deployment uses the deterministic live-data
+selector; OpenAI can be enabled later by setting `MODEL_PROVIDER=openai` and adding
+`OPENAI_API_KEY`. The production-capable Blueprint uses Starter
 services and a Basic database, so review Render pricing before applying it.
 
 ## Safety posture
