@@ -114,7 +114,9 @@ def test_builder_reports_verified_pre_scoring_equity_without_calling_it_official
     metrics = {metric.name: metric for metric in report.metrics}
     assert metrics["net_profit"].value == Decimal("125.50")
     assert metrics["net_profit"].label == "Pre-competition paper P&L"
+    assert metrics["return_percent"].label == "Pre-competition paper return"
     assert report.metadata is not None
+    assert report.metadata["source"] == "persisted_pre_scoring_equity_snapshot"
     assert report.metadata["official_scoring_window"] is False
     assert report.metadata["scoring_window_state"] == "pre_scoring"
 

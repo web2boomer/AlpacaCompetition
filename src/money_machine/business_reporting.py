@@ -155,11 +155,19 @@ class BusinessReportBuilder:
                     return_percent,
                     "percent",
                     "gauge",
-                    "Competition return",
+                    (
+                        "Competition return"
+                        if official_scoring_window
+                        else "Pre-competition paper return"
+                    ),
                 ),
             ),
             metadata={
-                "source": "persisted_official_equity_snapshot",
+                "source": (
+                    "persisted_official_equity_snapshot"
+                    if official_scoring_window
+                    else "persisted_pre_scoring_equity_snapshot"
+                ),
                 "source_snapshot_id": snapshot.id,
                 "source_snapshot_observed_at": snapshot.observed_at.astimezone(UTC).isoformat(),
                 "pnl_baseline_usd": str(BASELINE_EQUITY),
