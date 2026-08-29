@@ -8,6 +8,8 @@
 {% set risk = passport.get('risk', {}) %}
 {% set execution = passport.get('execution', {}) %}
 {% set model_validation = passport.get('model_validation', {}) %}
+{% set performance = summary.get('performance', {}) %}
+{% set latest_activity = activity[0] if activity else {} %}
 <section class="ops-header shell">
   <div>
     <h1>Money Machine</h1>
@@ -51,6 +53,25 @@
     </svg>
     <div class="chart-axis"><span>Competition baseline</span><span>Latest audited cycle</span></div>
   </article>
+</section>
+
+<section class="shell panel section-gap" aria-label="Official competition performance">
+  <div class="panel-head">
+    <div><span class="kicker">Verified account evidence</span><h2>Official competition performance</h2></div>
+    <span class="mode-badge">{{ performance.get('scoring_window_state', 'pre_scoring')|replace('_', ' ') }}</span>
+  </div>
+  {% if performance.get('available') %}
+  <div class="metric-grid ops-metrics performance-grid">
+    <article class="metric-card"><div class="metric-label">Starting equity</div><div class="metric-primary">{{ performance.starting_equity|money }}</div><p>Fixed competition baseline</p></article>
+    <article class="metric-card"><div class="metric-label">Latest Alpaca equity</div><div class="metric-primary">{{ performance.latest_equity|money }}</div><p>{{ performance.latest_snapshot_at }}</p></article>
+    <article class="metric-card"><div class="metric-label">Official P&amp;L</div><div class="metric-primary">{{ performance.dollar_pnl|money }}</div><p>{{ performance.percentage_return }}% return</p></article>
+    <article class="metric-card"><div class="metric-label">Peak / max drawdown</div><div class="metric-primary">{{ performance.peak_equity|money }}</div><p>{{ performance.maximum_drawdown|money }} · {{ performance.maximum_drawdown_percent }}%</p></article>
+    <article class="metric-card"><div class="metric-label">Broker exposure</div><div class="metric-primary">{{ performance.open_position_count }} positions</div><p>{{ performance.working_order_count }} working orders</p></article>
+    <article class="metric-card"><div class="metric-label">Flat status</div><div class="metric-primary state"><i></i>{{ 'confirmed flat' if performance.broker_confirmed_flat else 'recovery active' }}</div><p>{{ performance.result_status|replace('_', ' ') }}</p></article>
+  </div>
+  {% else %}
+  <div class="empty">No verified scoring-window equity observation is available yet. Alpaca remains authoritative for the official result.</div>
+  {% endif %}
 </section>
 
 <section class="shell metric-grid ops-metrics" aria-label="Current agent metrics">
@@ -124,6 +145,100 @@
     {% endfor %}
   </div>
 </section>
+
+<section class="shell architecture-section section-gap" aria-labelledby="architecture-title">
+  <div class="architecture-heading">
+    <div>
+      <span class="kicker">Live system map</span>
+      <h2 id="architecture-title">How a decision becomes an audited order</h2>
+      <p>Every cycle moves from broker evidence to a constrained model choice, then through code-enforced safety gates. The model can propose; only the deterministic execution layer can authorize.</p>
+    </div>
+    <div class="architecture-live" id="architecture-live" aria-live="polite">
+      <span><i></i><strong id="architecture-system-status">System responding</strong></span>
+      <small>Last activity <time id="architecture-last-activity" datetime="{{ latest_activity.get('timestamp', refreshed_at) }}">{{ latest_activity.get('display_time', refreshed_at) }}</time></small>
+    </div>
+  </div>
+
+  <div class="architecture-grid">
+    <ol class="system-flow" aria-label="Trading system architecture and decision flow">
+      <li class="flow-node broker-node">
+        <span class="node-index">01</span>
+        <div><small>Observe</small><strong>Alpaca MCP</strong><p>Live market, account, position, and order evidence.</p></div>
+      </li>
+      <li class="flow-node">
+        <span class="node-index">02</span>
+        <div><small>Generate</small><strong>Candidate engine</strong><p>Defined-risk structures filtered for data and liquidity.</p></div>
+      </li>
+      <li class="flow-node model-node">
+        <span class="node-index">03</span>
+        <div><small>Select</small><strong>{{ model_validation.get('provider', 'Model')|title }} selector</strong><p>Chooses one valid candidate or explicitly keeps cash.</p></div>
+      </li>
+      <li class="flow-node gate-node">
+        <span class="node-index">04</span>
+        <div><small>Govern</small><strong>Deterministic gates</strong><p>Position size, max loss, clock, and reconciliation checks.</p></div>
+      </li>
+      <li class="flow-node execution-node">
+        <span class="node-index">05</span>
+        <div><small>Execute</small><strong>Alpaca paper order</strong><p>Idempotent multi-leg limit order, only when every gate passes.</p></div>
+      </li>
+      <li class="flow-node passport-node">
+        <span class="node-index">06</span>
+        <div><small>Prove</small><strong>Decision Passport</strong><p>Inputs, reasoning, checks, order state, and outcome retained.</p></div>
+      </li>
+    </ol>
+
+    <aside class="architecture-telemetry" aria-label="Current architecture telemetry">
+      <div class="telemetry-head"><span class="kicker">Cycle telemetry</span><span class="telemetry-scan">Scanning</span></div>
+      <dl>
+        <div><dt>Operating mode</dt><dd id="architecture-mode">{{ state.get('execution_state', 'observe_only')|replace('_', ' ') }}</dd></div>
+        <div><dt>Decision engine</dt><dd>{{ model_validation.get('provider', 'unknown') }}{% if model_validation.get('model') %} · {{ model_validation.model }}{% endif %}</dd></div>
+        <div><dt>Latest choice</dt><dd>{{ decision.get('action', 'abstain')|replace('_', ' ') }}</dd></div>
+        <div><dt>Risk outcome</dt><dd>{{ 'Approved' if risk.get('approved') else 'Cash retained' }}</dd></div>
+        <div><dt>Order outcome</dt><dd>{{ execution.get('status', 'not submitted')|replace('_', ' ') }}</dd></div>
+        <div><dt>Audit trail</dt><dd>{{ 'Passport sealed' if passport.get('run_id') else 'Awaiting cycle' }}</dd></div>
+      </dl>
+      <div class="telemetry-note"><i></i><span>The illuminated path shows the active control loop. Status and timestamps refresh with the console every 15 seconds.</span></div>
+    </aside>
+  </div>
+</section>
+
+<section class="shell methodology-section section-gap" aria-labelledby="methodology-title">
+  <div class="methodology-intro">
+    <div>
+      <span class="kicker">Operating methodology</span>
+      <h2 id="methodology-title">Evidence first. Risk always bounded.</h2>
+    </div>
+    <p>Money Machine is designed around a simple rule: a trade is only interesting after it survives the controls. Each cycle starts with broker truth, narrows the opportunity set, and leaves behind enough evidence to reconstruct what happened.</p>
+  </div>
+
+  <div class="methodology-grid">
+    <article class="method-card">
+      <span class="method-number">01</span>
+      <div><h3>Observe</h3><p>Read the live account, working orders, positions, market clock, and option-chain evidence before forming a view.</p></div>
+      <small>Broker state is authoritative</small>
+    </article>
+    <article class="method-card">
+      <span class="method-number">02</span>
+      <div><h3>Constrain</h3><p>Generate only defined-risk structures, then reject weak data, poor liquidity, excessive loss, and late entries.</p></div>
+      <small>Cash is a valid outcome</small>
+    </article>
+    <article class="method-card">
+      <span class="method-number">03</span>
+      <div><h3>Act</h3><p>Submit idempotent multi-leg limit orders only after every deterministic gate passes. The model never bypasses policy.</p></div>
+      <small>Code controls execution</small>
+    </article>
+    <article class="method-card">
+      <span class="method-number">04</span>
+      <div><h3>Prove</h3><p>Checkpoint equity and seal the inputs, decision, checks, and order state into a durable decision passport.</p></div>
+      <small>Every cycle is reproducible</small>
+    </article>
+  </div>
+
+  <div class="methodology-footnote">
+    <span class="methodology-mark" aria-hidden="true">M</span>
+    <p><strong>Competition-window discipline.</strong> New exposure stops before the close, flattening begins on a fixed schedule, and official performance is measured only inside the published scoring window. Outside that window, the system preserves evidence and close authority without manufacturing a score.</p>
+  </div>
+</section>
 {% endblock %}
 {% block scripts %}
 <script>
@@ -133,6 +248,9 @@
     const updated = document.getElementById("last-updated");
     const connection = document.getElementById("connection-state");
     const consoleGrid = document.querySelector(".ops-grid");
+    const architectureLive = document.getElementById("architecture-live");
+    const architectureStatus = document.getElementById("architecture-system-status");
+    const architectureActivity = document.getElementById("architecture-last-activity");
 
     const localTime = (value) => new Date(value).toLocaleTimeString([], {
       hour: "numeric", minute: "2-digit", second: "2-digit"
@@ -152,6 +270,8 @@
         feed.append(empty);
         return;
       }
+      architectureActivity.dateTime = entries[0].timestamp;
+      architectureActivity.textContent = localTime(entries[0].timestamp);
       for (const entry of entries) {
         const row = document.createElement("a");
         row.className = `activity-entry ${entry.tone}`;
@@ -192,8 +312,13 @@
         renderActivity(payload.entries);
         setUpdated(payload.generated_at);
         connection.textContent = health.status === "healthy" ? "Live" : "Degraded";
+        const healthy = health.status === "healthy";
+        architectureStatus.textContent = healthy ? "System responding" : "Attention required";
+        architectureLive.classList.toggle("degraded", !healthy);
       } catch (_) {
         connection.textContent = "Retrying";
+        architectureStatus.textContent = "Reconnecting";
+        architectureLive.classList.add("degraded");
       }
     };
 
