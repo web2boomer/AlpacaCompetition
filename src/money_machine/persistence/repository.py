@@ -724,13 +724,19 @@ class AuditRepository:
         return activity
 
     def dashboard_summary(self) -> dict[str, Any]:
+        latest_passport = self.latest_passport()
+        official = bool(latest_passport and latest_passport.get("official"))
         with self.database.session() as session:
             latest_equity = session.scalar(
-                select(EquitySnapshotORM).order_by(desc(EquitySnapshotORM.observed_at)).limit(1)
+                select(EquitySnapshotORM)
+                .where(EquitySnapshotORM.official == official)
+                .order_by(desc(EquitySnapshotORM.observed_at))
+                .limit(1)
             )
             equities = list(
                 session.scalars(
                     select(EquitySnapshotORM)
+                    .where(EquitySnapshotORM.official == official)
                     .order_by(desc(EquitySnapshotORM.observed_at))
                     .limit(120)
                 )
@@ -758,7 +764,7 @@ class AuditRepository:
                 "equities": equities,
                 "state": state,
                 "counts": counts,
-                "latest_passport": self.latest_passport(),
+                "latest_passport": latest_passport,
             }
 
 
