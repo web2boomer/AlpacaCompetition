@@ -76,6 +76,12 @@ def test_forbidden_execution_enabled_toggle(monkeypatch: pytest.MonkeyPatch) -> 
         configured_settings()
 
 
+def test_forbidden_mission_control_enable_toggle(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MISSION_CONTROL_REPORTING_ENABLED", "true")
+    with pytest.raises(ValidationError, match="scheduling controls reporting"):
+        configured_settings()
+
+
 def test_account_identity_verified_without_exposing_id() -> None:
     verification = verify_account_identity(configured_settings(), account())
     assert verification.verified

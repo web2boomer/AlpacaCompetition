@@ -14,6 +14,7 @@ from money_machine.domain.enums import RunMode
 from money_machine.model_provider import ReplayModelProvider
 from money_machine.persistence.database import Database
 from money_machine.persistence.repository import AuditRepository
+from money_machine.safety import configured_account_fingerprint
 from money_machine.service import AgentService
 from money_machine.settings import Settings
 
@@ -58,6 +59,16 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request) -> HTMLResponse:
         summary = repository.dashboard_summary()
+        fingerprint = configured_account_fingerprint(app_settings)
+        performance = repository.competition_performance_summary(
+            account_fingerprint=fingerprint,
+            now=datetime.now(UTC),
+        )
+        summary["performance"] = performance
+        official_curve = repository.official_equity_curve(account_fingerprint=fingerprint)
+        if official_curve:
+            summary["equities"] = official_curve
+            summary["latest_equity"] = official_curve[-1]
         passport = summary.get("latest_passport") or {}
         chart = _equity_chart(summary.get("equities", []))
         return templates.TemplateResponse(
@@ -110,6 +121,25 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
                 "entries": activity,
             }
         )
+
+    @app.get("/api/performance")
+    async def competition_performance() -> JSONResponse:
+        return JSONResponse(
+            repository.competition_performance_summary(
+                account_fingerprint=configured_account_fingerprint(app_settings),
+                now=datetime.now(UTC),
+            )
+        )
+
+    @app.get("/api/performance/final")
+    async def final_competition_performance() -> JSONResponse:
+        summary = repository.competition_performance_summary(
+            account_fingerprint=configured_account_fingerprint(app_settings),
+            now=datetime.now(UTC),
+        )
+        if summary["result_status"] != "final_eod_snapshot":
+            raise HTTPException(status_code=404, detail="Final EOD performance is not available")
+        return JSONResponse(summary)
 
     @app.get("/api/health")
     async def health() -> JSONResponse:

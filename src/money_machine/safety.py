@@ -57,4 +57,12 @@ def new_entry_authorized(account_role: AccountRole, *, now: datetime | None = No
     if account_role is AccountRole.DEVELOPMENT:
         return True
     observed_at = now or datetime.now(UTC)
-    return competition_clock(observed_at, has_positions=False).allow_new_entries
+    return competition_clock(observed_at, has_exposure=False).allow_new_entries
+
+
+def configured_account_fingerprint(settings: Settings) -> str | None:
+    """Return the redacted configured account fingerprint without exposing its identifier."""
+    if settings.alpaca_expected_account_id is None:
+        return None
+    expected = settings.alpaca_expected_account_id.get_secret_value()
+    return hashlib.sha256(expected.encode()).hexdigest()[:12] if expected else None

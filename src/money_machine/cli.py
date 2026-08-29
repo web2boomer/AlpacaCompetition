@@ -11,12 +11,15 @@ from alembic.config import Config
 from money_machine.acceptance import run_production_acceptance
 from money_machine.adapters.alpaca_mcp import AlpacaMcpV2Adapter
 from money_machine.adapters.replay import ReplayAlpacaAdapter
+from money_machine.business_reporting import BusinessReportBuilder, BusinessReportingOrchestrator
 from money_machine.development_acceptance import run_development_round_trip
+from money_machine.domain.clock import EOD_EQUITY_SNAPSHOT_AT
 from money_machine.domain.enums import RunMode
 from money_machine.logging_config import configure_logging
 from money_machine.model_provider import ReplayModelProvider
 from money_machine.persistence.database import Database, normalize_database_url
 from money_machine.persistence.repository import AuditRepository
+from money_machine.safety import configured_account_fingerprint
 from money_machine.scheduler import run_scheduler
 from money_machine.service import AgentService
 from money_machine.settings import Settings, load_local_environment
@@ -36,6 +39,18 @@ def main() -> None:
     scheduler.add_argument("--once", action="store_true")
     subparsers.add_parser("acceptance", help="run read-only production acceptance checks")
     subparsers.add_parser("mcp-read-check", help="verify guarded Alpaca MCP V2 reads")
+    subparsers.add_parser(
+        "mission-control-report-dry-run",
+        help="print the current persisted Mission Control report without sending",
+    )
+    subparsers.add_parser(
+        "mission-control-report",
+        help="submit one due persisted report to Mission Control",
+    )
+    subparsers.add_parser(
+        "competition-performance-export",
+        help="print the deterministic read-only official performance evidence",
+    )
     round_trip = subparsers.add_parser(
         "development-round-trip",
         help="open and close one bounded spread in the development paper account",
@@ -75,6 +90,33 @@ def main() -> None:
             raise SystemExit(2)
     elif args.command == "mcp-read-check":
         _print_json(asyncio.run(_mcp_read_check(settings)))
+    elif args.command == "mission-control-report-dry-run":
+        business_report = BusinessReportBuilder(
+            repository,
+            interval_minutes=settings.mission_control_reporting_interval_minutes,
+            account_fingerprint=configured_account_fingerprint(settings),
+        ).build(
+            now=datetime.now(UTC),
+            environment=settings.mission_control_environment or settings.app_env.value,
+        )
+        if business_report is None:
+            raise SystemExit("no completed official equity period is available")
+        _print_json(business_report.as_payload())
+    elif args.command == "mission-control-report":
+        result = BusinessReportingOrchestrator(settings, repository).report_if_due(
+            now=datetime.now(UTC)
+        )
+        if result is None:
+            raise SystemExit("no report was delivered; inspect the redacted reporting warning")
+        _print_json({"report_id": result.event_id, "duplicate": result.duplicate})
+    elif args.command == "competition-performance-export":
+        performance = repository.competition_performance_summary(
+            account_fingerprint=configured_account_fingerprint(settings),
+            now=EOD_EQUITY_SNAPSHOT_AT,
+        )
+        if performance["result_status"] != "final_eod_snapshot":
+            raise SystemExit("the authoritative Thursday EOD snapshot is not available")
+        _print_json(performance)
     elif args.command == "development-round-trip":
         if not args.confirm_paper_order:
             raise SystemExit("development round trip requires --confirm-paper-order")

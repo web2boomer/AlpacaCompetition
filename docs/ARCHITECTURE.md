@@ -24,11 +24,12 @@
 - `persistence/`: append-oriented SQLAlchemy audit ledger.
 - `service.py`: application orchestration; depends on ports and repository, not FastAPI.
 - `web.py`: public read-only presentation plus canonical replay endpoint.
-- `scheduler.py`: five-minute loop with database lease and graceful shutdown.
+- `scheduler.py`: five-minute loop with database lease and graceful shutdown; one-minute recovery
+  cadence from forced-liquidation start until broker-confirmed flat.
 
 ## Data and failure policy
 
-Alpaca is authoritative for account, order, fill, position, and portfolio state. PostgreSQL is authoritative for decision attribution and the audit trail. Broker state without local attribution sets reconciliation unclean and blocks entries. Close requests invert only locally attributed structure legs, use current per-leg quotes, and cannot carry opening position intents. Exceptions are reduced to safe type-only incident codes; raw credential-bearing exceptions never enter Passports or logs.
+Alpaca is authoritative for account, order, fill, position, and portfolio state. PostgreSQL is authoritative for decision attribution and the audit trail. Broker state without local attribution sets reconciliation unclean and blocks entries. Account equity is checkpointed immediately after identity and brokerage-state verification, before market-data collection, so a market-data failure blocks trading without losing performance evidence. Close requests invert only locally attributed structure legs, use current per-leg quotes, and cannot carry opening position intents. Exceptions are reduced to safe type-only incident codes; raw credential-bearing exceptions never enter Passports or logs.
 
 The minimum entities from `SPEC.md` are represented explicitly: AgentRun, MarketSnapshot, Candidate, Auction, ModelDecision, RiskDecision, OptionStructure, BrokerOrder, Fill, EquitySnapshot, PositionSnapshot, and SystemState. Corrections are represented by new observations/system states rather than silent historical rewrites.
 

@@ -9,8 +9,10 @@ from money_machine.adapters.replay import infer_atm_implied_move
 from money_machine.domain.candidates import CandidateBuildReport, build_candidates
 from money_machine.domain.clock import (
     BASELINE_EQUITY,
+    FORCED_FLATTEN_STARTS_AT,
     CompetitionClockSnapshot,
     competition_clock,
+    is_official_performance_observation,
 )
 from money_machine.domain.enums import (
     AccountRole,
@@ -75,20 +77,29 @@ class AgentService:
             }
             return CycleOutcome(run_id, False, False, False, passport)
 
+        account: Any = None
+        fingerprint = "unverified"
+        production_account = (
+            mode is RunMode.LIVE and self.settings.app_env is AppEnvironment.PRODUCTION
+        )
+        official = production_account and is_official_performance_observation(now)
+        broker_position_count = 0
+        working_order_count = 0
         try:
-            account, orders, positions, activities, market_clock_payload = await asyncio.gather(
-                adapter.account(),
+            account = await adapter.account()
+            if mode is RunMode.REPLAY:
+                fingerprint = "replay"
+            else:
+                fingerprint = verify_account_identity(self.settings, account).account_fingerprint
+            orders, positions, activities = await asyncio.gather(
                 adapter.orders(status="open"),
                 adapter.positions(),
                 adapter.activities(),
-                adapter.market_clock(),
             )
-            fingerprint = "replay"
-            official = mode is RunMode.LIVE and self.settings.app_env is AppEnvironment.PRODUCTION
-            if mode is RunMode.LIVE:
-                fingerprint = verify_account_identity(self.settings, account).account_fingerprint
+            broker_position_count = len(positions)
+            working_order_count = len(orders)
             if (
-                official
+                production_account
                 and self.settings.account_role is AccountRole.COMPETITION
                 and not self.repository.has_managed_orders(AccountRole.COMPETITION.value)
             ):
@@ -105,8 +116,22 @@ class AgentService:
                 now=now,
                 authoritative_absence=mode is RunMode.LIVE,
             )
+            risk_summary = self.repository.portfolio_risk_summary(account.equity, now=now)
+            peak_equity = max(account.equity, risk_summary["peak_equity"], BASELINE_EQUITY)
+            self.repository.persist_account_checkpoint(
+                run_id,
+                account=account,
+                official=official,
+                peak_equity=peak_equity,
+                positions=list(positions),
+                observed_at=now,
+            )
+            market_clock_payload = await adapter.market_clock()
             market_open = bool(market_clock_payload.get("is_open", False))
-            clock = competition_clock(now, has_positions=bool(positions))
+            clock = competition_clock(
+                now,
+                has_exposure=bool(positions) or bool(orders),
+            )
             execution_state = clock.state
             if self.settings.app_env is AppEnvironment.DEVELOPMENT:
                 execution_state = (
@@ -122,8 +147,6 @@ class AgentService:
             chains = {
                 symbol: list(chain) for symbol, chain in zip(UNIVERSE, chains_raw, strict=True)
             }
-            risk_summary = self.repository.portfolio_risk_summary(account.equity, now=now)
-            peak_equity = max(account.equity, risk_summary["peak_equity"], BASELINE_EQUITY)
             portfolio_exit_reason = _portfolio_exit_reason(
                 equity=account.equity,
                 start_of_day_equity=risk_summary["start_of_day_equity"],
@@ -150,15 +173,10 @@ class AgentService:
                 infer_atm_implied_move(snapshot, chains[snapshot.symbol])
                 for snapshot in snapshots_raw
             ]
-            self.repository.persist_observation(
+            self.repository.persist_market_observations(
                 run_id,
                 source="replay" if mode is RunMode.REPLAY else "alpaca_mcp_v2",
                 snapshots=snapshots,
-                account=account,
-                official=official,
-                peak_equity=peak_equity,
-                positions=list(positions),
-                observed_at=now,
             )
             report = build_candidates(snapshots, chains, now)
             self.repository.persist_candidates(run_id, report.candidates)
@@ -226,8 +244,12 @@ class AgentService:
                 run_id=run_id,
                 mode=mode,
                 official=official,
+                production_account=production_account,
                 now=now,
                 fingerprint=fingerprint,
+                clock=clock,
+                broker_position_count=broker_position_count,
+                working_order_count=working_order_count,
                 execution_state=execution_state,
                 account=account,
                 snapshots=snapshots,
@@ -256,8 +278,24 @@ class AgentService:
             passport = {
                 "run_id": run_id,
                 "mode": mode.value,
-                "official": False,
+                "official": official,
+                "production_account": production_account,
                 "status": "failed_closed",
+                "observed_at": now.isoformat(),
+                "result_label": (
+                    "OFFICIAL ALPACA PAPER" if official else "NOT AN OFFICIAL SCORING OBSERVATION"
+                ),
+                "account": {
+                    "fingerprint": fingerprint,
+                    "equity": str(account.equity) if account is not None else None,
+                    "pnl": (str(account.equity - BASELINE_EQUITY) if account is not None else None),
+                    "is_paper": account.is_paper if account is not None else None,
+                    "open_position_count": broker_position_count,
+                    "working_order_count": working_order_count,
+                    "broker_confirmed_flat": (
+                        broker_position_count == 0 and working_order_count == 0
+                    ),
+                },
                 "incident": {"code": "cycle_exception", "type": incident},
                 "decision": {"action": "abstain", "thesis": "Cycle failed closed."},
                 "risk": {"approved": False, "reason_codes": ["system_failure"]},
@@ -294,29 +332,68 @@ class AgentService:
     ) -> tuple[tuple[dict[str, Any], ...], tuple[str, ...]]:
         events: list[dict[str, Any]] = []
         incidents: list[str] = []
+        active_closing_candidates: set[str] = set()
+        if clock.flat_target_reached and (positions or self.repository.pending_managed_orders()):
+            incidents.append("flat_target_exposure_remaining")
         for order in self.repository.pending_managed_orders():
-            action = stale_order_action(
-                submitted_at=order.submitted_at,
-                now=now,
-                attempt=order.attempt,
-                original_limit=order.original_limit,
-                is_credit=order.is_credit,
+            if clock.force_flatten_all and order.is_closing:
+                broker_order = await adapter.order_by_id(order.broker_order_id)
+                broker_status = str(broker_order.get("status") or "").lower()
+                if broker_status in {"canceled", "expired", "filled", "rejected"}:
+                    self.repository.mark_order_status(
+                        order.client_order_id, status=broker_status, now=now
+                    )
+                    events.append(
+                        {
+                            "event": "closing_order_terminal_reconciled",
+                            "status": broker_status,
+                            "remaining_quantity": order.remaining_quantity,
+                        }
+                    )
+                    continue
+            cutoff_cancel = not order.is_closing and not allow_new_entries
+            action = (
+                None
+                if cutoff_cancel
+                else stale_order_action(
+                    submitted_at=order.submitted_at,
+                    now=now,
+                    attempt=order.attempt,
+                    original_limit=order.original_limit,
+                    is_credit=order.is_credit,
+                )
             )
-            if action.action == "wait":
+            closing_candidate = order.candidate_id.removesuffix(":close")
+            if action is not None and action.action == "wait":
+                if order.is_closing:
+                    active_closing_candidates.add(closing_candidate)
                 continue
             await adapter.cancel_order(order.broker_order_id)
-            self.repository.mark_order_status(order.client_order_id, status="canceled", now=now)
+            canceled_status = (
+                "partially_filled_canceled"
+                if not order.is_closing and order.status == "partially_filled"
+                else "canceled"
+            )
+            self.repository.mark_order_status(
+                order.client_order_id, status=canceled_status, now=now
+            )
             events.append(
                 {
-                    "event": "stale_order_canceled",
+                    "event": (
+                        "entry_order_canceled_at_cutoff"
+                        if cutoff_cancel
+                        else "stale_order_canceled"
+                    ),
                     "client_order_id": order.client_order_id,
                     "broker_order_id": order.broker_order_id,
-                    "status": "canceled",
+                    "status": canceled_status,
+                    "remaining_quantity": order.remaining_quantity,
                 }
             )
             may_replace = market_open and (order.is_closing or allow_new_entries)
             if (
-                action.action != "cancel_and_replace"
+                action is None
+                or action.action != "cancel_and_replace"
                 or not may_replace
                 or action.next_limit is None
             ):
@@ -326,10 +403,11 @@ class AgentService:
                 self.settings.client_order_prefix,
                 cycle_key=cycle_key,
                 candidate_id=order.candidate_id,
-                quantity=order.quantity,
+                quantity=order.remaining_quantity,
                 attempt=next_attempt,
             )
             if self.repository.order_exists(client_order_id):
+                active_closing_candidates.add(closing_candidate)
                 continue
             request = replacement_request(
                 order,
@@ -339,6 +417,7 @@ class AgentService:
             )
             result = await adapter.place_option_order(request)
             self.repository.persist_order(order.agent_run_id, request, result)
+            active_closing_candidates.add(closing_candidate)
             events.append(
                 {
                     "event": "order_replaced_with_bounded_concession",
@@ -356,7 +435,7 @@ class AgentService:
             if position.get("symbol")
         }
         for managed in self.repository.open_managed_structures():
-            if managed.status == "closing":
+            if managed.candidate_id in active_closing_candidates:
                 continue
             leg_symbols = [leg.symbol for leg in managed.structure.legs]
             present = [position_quantities.get(symbol, Decimal("0")) > 0 for symbol in leg_symbols]
@@ -377,10 +456,10 @@ class AgentService:
             if not market_open:
                 continue
             deadline_reason = None
-            if clock.must_flatten_all:
-                deadline_reason = "final_flatten_deadline"
-            elif clock.must_flatten_short_vol and managed.structure.is_credit:
-                deadline_reason = "short_vol_flatten_deadline"
+            if clock.force_flatten_all:
+                deadline_reason = "forced_liquidation_window"
+            elif managed.status == "closing":
+                deadline_reason = "close_recovery"
             signal = structure_exit_signal(
                 managed,
                 quotes=quote_map,
@@ -433,7 +512,8 @@ class AgentService:
 
 
 def _cycle_key(now: datetime, mode: RunMode) -> str:
-    minute = now.minute - now.minute % 5
+    bucket_minutes = 1 if now >= FORCED_FLATTEN_STARTS_AT else 5
+    minute = now.minute - now.minute % bucket_minutes
     bucket = now.replace(minute=minute, second=0, microsecond=0)
     return f"{mode.value}:{bucket.isoformat()}"
 
@@ -450,8 +530,12 @@ def _passport(
     run_id: str,
     mode: RunMode,
     official: bool,
+    production_account: bool,
     now: datetime,
     fingerprint: str,
+    clock: CompetitionClockSnapshot,
+    broker_position_count: int,
+    working_order_count: int,
     execution_state: ExecutionState,
     account: Any,
     snapshots: list[Any],
@@ -476,12 +560,25 @@ def _passport(
         "observed_at": now.isoformat(),
         "mode": mode.value,
         "official": official,
-        "result_label": "OFFICIAL ALPACA PAPER" if official else "REPLAY — NOT OFFICIAL P&L",
+        "production_account": production_account,
+        "scoring_window_state": clock.scoring_window_state,
+        "result_label": (
+            "OFFICIAL ALPACA PAPER"
+            if official
+            else (
+                "COMPETITION ACCOUNT — OUTSIDE SCORING WINDOW"
+                if production_account
+                else "REPLAY — NOT OFFICIAL P&L"
+            )
+        ),
         "account": {
             "fingerprint": fingerprint,
             "equity": str(account.equity),
             "pnl": str(account.equity - BASELINE_EQUITY),
             "is_paper": account.is_paper,
+            "open_position_count": broker_position_count,
+            "working_order_count": working_order_count,
+            "broker_confirmed_flat": broker_position_count == 0 and working_order_count == 0,
         },
         "operational_state": {
             "execution_state": execution_state.value,

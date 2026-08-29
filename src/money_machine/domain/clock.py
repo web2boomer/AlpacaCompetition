@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Literal
 
 from money_machine.domain.enums import ExecutionState
 
@@ -8,11 +9,14 @@ HACKATHON_STARTS_AT = datetime(2026, 8, 28, 13, 30, tzinfo=UTC)
 SCORING_STARTS_AT = datetime(2026, 8, 31, 13, 30, tzinfo=UTC)
 # Backwards-compatible name for the start of trading authority.
 STARTS_AT = SCORING_STARTS_AT
-NEW_ENTRY_CUTOFF = datetime(2026, 9, 3, 19, 30, tzinfo=UTC)
-SHORT_VOL_FLATTEN_BY = datetime(2026, 9, 3, 19, 40, tzinfo=UTC)
-FINAL_FLATTEN_BY = datetime(2026, 9, 3, 19, 45, tzinfo=UTC)
+NEW_ENTRY_CUTOFF = datetime(2026, 9, 3, 18, 30, tzinfo=UTC)
+FORCED_FLATTEN_STARTS_AT = datetime(2026, 9, 3, 19, 15, tzinfo=UTC)
+FLAT_TARGET_AT = datetime(2026, 9, 3, 19, 45, tzinfo=UTC)
+EOD_EQUITY_SNAPSHOT_AT = datetime(2026, 9, 3, 20, 0, tzinfo=UTC)
 ENDS_AT = datetime(2026, 9, 4, 13, 30, tzinfo=UTC)
 BASELINE_EQUITY = Decimal("100000.00")
+
+ScoringWindowState = Literal["pre_scoring", "scoring", "eod_measurement", "post_scoring"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,12 +24,31 @@ class CompetitionClockSnapshot:
     at: datetime
     state: ExecutionState
     allow_new_entries: bool
-    must_flatten_short_vol: bool
-    must_flatten_all: bool
+    force_flatten_all: bool
+    flat_target_reached: bool
+    eod_equity_measurement_reached: bool
     competition_complete: bool
+    scoring_window_state: ScoringWindowState
 
 
-def competition_clock(at: datetime, *, has_positions: bool) -> CompetitionClockSnapshot:
+def scoring_window_state(at: datetime) -> ScoringWindowState:
+    if at.tzinfo is None or at.utcoffset() is None:
+        raise ValueError("competition clock requires a timezone-aware timestamp")
+    now = at.astimezone(UTC)
+    if now < SCORING_STARTS_AT:
+        return "pre_scoring"
+    if now < EOD_EQUITY_SNAPSHOT_AT:
+        return "scoring"
+    if now == EOD_EQUITY_SNAPSHOT_AT:
+        return "eod_measurement"
+    return "post_scoring"
+
+
+def is_official_performance_observation(at: datetime) -> bool:
+    return scoring_window_state(at) in {"scoring", "eod_measurement"}
+
+
+def competition_clock(at: datetime, *, has_exposure: bool) -> CompetitionClockSnapshot:
     if at.tzinfo is None:
         raise ValueError("competition clock requires a timezone-aware timestamp")
     now = at.astimezone(UTC)
@@ -35,7 +58,7 @@ def competition_clock(at: datetime, *, has_positions: bool) -> CompetitionClockS
         state = ExecutionState.FULL_EXECUTION
     elif now < ENDS_AT:
         state = ExecutionState.CLOSE_ONLY
-    elif has_positions:
+    elif has_exposure:
         state = ExecutionState.CLOSE_ONLY_UNTIL_FLAT
     else:
         state = ExecutionState.DISABLED
@@ -43,7 +66,9 @@ def competition_clock(at: datetime, *, has_positions: bool) -> CompetitionClockS
         at=now,
         state=state,
         allow_new_entries=state is ExecutionState.FULL_EXECUTION,
-        must_flatten_short_vol=now >= SHORT_VOL_FLATTEN_BY,
-        must_flatten_all=now >= FINAL_FLATTEN_BY,
-        competition_complete=now >= ENDS_AT and not has_positions,
+        force_flatten_all=now >= FORCED_FLATTEN_STARTS_AT,
+        flat_target_reached=now >= FLAT_TARGET_AT,
+        eod_equity_measurement_reached=now >= EOD_EQUITY_SNAPSHOT_AT,
+        competition_complete=now >= ENDS_AT and not has_exposure,
+        scoring_window_state=scoring_window_state(now),
     )

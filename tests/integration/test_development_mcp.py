@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -16,19 +17,24 @@ async def test_development_mcp_authentication_and_reads() -> None:
         env_file = legacy_env_file
     if not env_file.exists():
         pytest.skip(".env.development.local is missing")
-    load_local_environment(env_file)
-    settings = Settings()
-    if settings.account_role.value != "development":
-        pytest.skip("development account role is not configured")
-    async with AlpacaMcpV2Adapter(settings) as adapter:
-        account = await adapter.account()
-        verification = verify_account_identity(settings, account)
-        clock = await adapter.market_clock()
-        history = await adapter.portfolio_history()
-        snapshot = await adapter.underlying_snapshot("SPY")
-        chain = await adapter.option_chain("SPY")
-        open_orders = await adapter.orders(status="open")
-        positions = await adapter.positions()
+    original_environment = dict(os.environ)
+    try:
+        load_local_environment(env_file)
+        settings = Settings()
+        if settings.account_role.value != "development":
+            pytest.skip("development account role is not configured")
+        async with AlpacaMcpV2Adapter(settings) as adapter:
+            account = await adapter.account()
+            verification = verify_account_identity(settings, account)
+            clock = await adapter.market_clock()
+            history = await adapter.portfolio_history()
+            snapshot = await adapter.underlying_snapshot("SPY")
+            chain = await adapter.option_chain("SPY")
+            open_orders = await adapter.orders(status="open")
+            positions = await adapter.positions()
+    finally:
+        os.environ.clear()
+        os.environ.update(original_environment)
     assert verification.verified
     assert account.is_paper
     assert clock

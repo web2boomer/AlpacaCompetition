@@ -83,6 +83,9 @@ Commands report credentials only as present or missing. They never print account
 # Read-only competition acceptance report (requires production/competition values)
 .venv/bin/money-machine --env-file .env.competition.local acceptance
 
+# Deterministic redacted scoring-window performance evidence
+.venv/bin/money-machine --env-file .env.competition.local competition-performance-export
+
 # Persistent entry kill switch; cancel/close authority is unaffected
 .venv/bin/money-machine kill-switch on
 .venv/bin/money-machine kill-switch status
@@ -149,7 +152,7 @@ services and a Basic database, so review Render pricing before applying it.
 - Structures use one underlying, one expiry, equal leg ratios, and bounded long wings.
 - Multi-leg entries are day limit orders with deterministic client IDs.
 - Stale entries are canceled and can be replaced only twice within a fixed concession budget.
-- Open positions use executable-quote profit targets, stop losses, the model's maximum holding time, and portfolio loss/drawdown exits. New entries stop at the immutable cutoff; short-volatility and final flatten deadlines submit close-only multi-leg orders, and close authority persists until flat.
+- Open positions use executable-quote profit targets, stop losses, the model's maximum holding time, and portfolio loss/drawdown exits. New entries and all working opening orders stop at Thursday's 2:30 PM ET cutoff. Forced liquidation of every managed credit and debit structure starts by 3:15 PM, the internal flat target is 3:45 PM, and Alpaca's 4:00 PM EOD equity is the authoritative measurement. Close-only recovery persists until broker positions and relevant working orders confirm flat.
 - Counterfactual and replay data are visually and structurally separate from official P&L.
 
 See [SECURITY.md](SECURITY.md) for incident handling and disclosure.

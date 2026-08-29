@@ -35,6 +35,7 @@ class ManagedOrder:
     broker_order_id: str
     status: str
     quantity: int
+    remaining_quantity: int
     original_limit: Decimal
     attempt: int
     submitted_at: datetime
@@ -92,7 +93,7 @@ def replacement_request(
     return BrokerOrderRequest(
         client_order_id=client_order_id,
         candidate_id=order.candidate_id,
-        quantity=order.quantity,
+        quantity=order.remaining_quantity,
         limit_price=next_limit,
         is_credit=order.is_credit,
         legs=order.legs,

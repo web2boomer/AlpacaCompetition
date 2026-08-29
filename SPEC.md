@@ -3,7 +3,9 @@
 Status: Draft for kickoff implementation
 Competition: Alpaca AI Trading Agents Hackathon
 Track: Options Alpha Agents
-Competition window: August 28, 2026 at 11:00 AM EDT through September 4, 2026 at 11:00 AM EDT
+Hackathon window: August 28, 2026 at 9:30 AM ET through September 4, 2026 at 9:30 AM ET
+Official trading starts: August 31, 2026 at 9:30 AM ET
+Authoritative performance measurement: September 3, 2026 at 4:00 PM ET
 
 ## 1. Product thesis
 
@@ -156,9 +158,10 @@ Internal timestamps must use UTC:
 ```text
 HACKATHON_STARTS_AT      2026-08-28 13:30:00Z  # Friday 9:30 AM EDT (build window)
 SCORING_STARTS_AT        2026-08-31 13:30:00Z  # Monday 9:30 AM EDT (trading window)
-NEW_ENTRY_CUTOFF         2026-09-03 19:30:00Z  # 3:30 PM EDT
-SHORT_VOL_FLATTEN_BY     2026-09-03 19:40:00Z  # Thursday 3:40 PM EDT
-FINAL_FLATTEN_BY         2026-09-03 19:45:00Z  # Thursday 3:45 PM EDT
+NEW_ENTRY_CUTOFF         2026-09-03 18:30:00Z  # Thursday 2:30 PM EDT
+FORCED_FLATTEN_STARTS_AT 2026-09-03 19:15:00Z  # Thursday 3:15 PM EDT
+FLAT_TARGET_AT           2026-09-03 19:45:00Z  # Thursday 3:45 PM EDT
+EOD_EQUITY_SNAPSHOT_AT   2026-09-03 20:00:00Z  # Thursday 4:00 PM EDT
 ENDS_AT                  2026-09-04 13:30:00Z  # Friday 9:30 AM EDT
 BASELINE_EQUITY          100000.00
 ```
@@ -173,7 +176,14 @@ After ENDS_AT with positions     CLOSE_ONLY_UNTIL_FLAT
 After ENDS_AT and flat           DISABLED
 ```
 
-Risk-reducing cancel and close operations remain available whenever exposure exists. New entries never remain available after the entry cutoff.
+At `NEW_ENTRY_CUTOFF`, every pending opening order is canceled immediately regardless of age and
+can never be replaced. `FORCED_FLATTEN_STARTS_AT` is the trigger for repeated close attempts across
+both credit and debit structures; it is not a promise that the account is already flat.
+`FLAT_TARGET_AT` is the internal target at which residual positions or working orders become a
+prominent incident. `EOD_EQUITY_SNAPSHOT_AT` is Alpaca's authoritative Thursday measurement,
+including Thursday exercise and assignment effects. Risk-reducing cancel and close operations
+remain available whenever authoritative broker positions or relevant working orders show exposure,
+including after the formal Friday end.
 
 Official P&L is measured from Monday's open using the fresh competition account and final account equity is taken after Thursday's close. Every position is therefore scheduled flat before Thursday's closing bell; the Friday hackathon deadline is not treated as extra trading time. September 4 also contains the 8:30 AM EDT Employment Situation release, so no exposure is carried into it.
 
@@ -183,7 +193,8 @@ Boundary tests are required for one second before, exactly at, and one second af
 
 ## 7. Autonomous agent loop
 
-The regular market-hours loop runs every five minutes, with immediate runs after order, fill, cancellation, and risk events.
+The regular market-hours loop runs every five minutes and increases to approximately once per minute
+from forced-liquidation start until Alpaca positions and relevant working orders confirm flat.
 
 Each loop:
 
@@ -341,7 +352,11 @@ SUBMITTED -> CANCELED/REJECTED/EXPIRED
 FILLED -> OPEN -> CLOSING -> CLOSED
 ```
 
-Stale orders are canceled and may be repriced only within a small deterministic concession budget. The agent must never chase indefinitely.
+Stale orders are canceled and may be repriced only within a small deterministic concession budget.
+Opening orders are canceled immediately at the entry cutoff. Closing orders reprice only their
+remaining quantity. Ordinary close-repricing exhaustion cancels that order but does not strand the
+structure: authoritative remaining exposure becomes eligible for a new idempotent emergency-close
+series with a unique deterministic client ID and increasingly marketable multi-leg limits.
 
 ### 11.3 Reconciliation
 
@@ -357,7 +372,10 @@ On startup and every cycle:
 
 ## 12. Performance measurement
 
-The competition account's Alpaca portfolio history is the official scoreboard.
+There is no public leaderboard. Alpaca's verified competition-account equity at Thursday EOD is
+authoritative for the official result. The application maintains read-only self-tracking evidence,
+bounded to Monday's scoring start through the Thursday EOD checkpoint and scoped to the configured
+account fingerprint. Pre-scoring production rows and post-EOD observations are excluded.
 
 At production initialization, record:
 
@@ -366,7 +384,7 @@ At production initialization, record:
 - Baseline equity of $100,000.
 - Empty order and position state.
 
-Record at least once per minute during regular market hours:
+Record on every scheduler cycle (approximately once per minute during liquidation recovery):
 
 - Equity, cash, buying power, and portfolio value.
 - Realized and unrealized P&L.
@@ -572,15 +590,17 @@ All submission copy is maintained in `SUBMISSION.md` before it is pasted into La
 
 ### Thursday
 
-- Stop new entries at the fixed cutoff.
-- Flatten short-volatility risk before the final close.
-- Freeze code and finalize every submission artifact.
+- Prepare final evidence before the one permitted submission.
+- Stop new entries at 2:30 PM ET and cancel every pending opening order.
+- Begin forced liquidation no later than 3:15 PM ET; target broker-confirmed flat by 3:45 PM ET.
+- Capture Alpaca's authoritative EOD equity at 4:00 PM ET, including exercise/assignment effects.
+- Enter the account ID only in the private submission field and submit once on Thursday.
 
 ### Friday
 
-- Reconcile and flatten any residual exposure by the fixed deadline.
-- Capture final account, P&L, dashboard, and audit snapshots.
-- Submit by 10:30 AM EDT, leaving a thirty-minute buffer.
+- Preserve close-only recovery for any residual broker exposure.
+- Treat 9:30 AM ET as the formal hackathon/scoring end, not additional trading time.
+- Do not make a second submission.
 
 ## 20. Strategy and scope-change governance
 

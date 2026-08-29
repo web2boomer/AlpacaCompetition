@@ -41,12 +41,21 @@ class Settings(BaseSettings):
     mcp_command: str = "alpaca-mcp-server"
     mcp_args: str = ""
     log_level: str = "INFO"
+    mission_control_url: str | None = None
+    mission_control_project: str = "alpaca-competition"
+    mission_control_token: SecretStr | None = None
+    mission_control_reporting_interval_minutes: int = Field(default=60, ge=1)
+    mission_control_environment: str | None = None
 
     @model_validator(mode="after")
     def fail_closed_configuration(self) -> "Settings":
         if "EXECUTION_ENABLED" in os.environ:
             raise ValueError(
                 "EXECUTION_ENABLED is forbidden; authority is derived from safety state"
+            )
+        if "MISSION_CONTROL_REPORTING_ENABLED" in os.environ:
+            raise ValueError(
+                "MISSION_CONTROL_REPORTING_ENABLED is forbidden; scheduling controls reporting"
             )
         valid_pair = {
             AppEnvironment.DEVELOPMENT: AccountRole.DEVELOPMENT,

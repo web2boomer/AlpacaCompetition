@@ -24,6 +24,14 @@ projects:
                 value: openai
               - key: MCP_COMMAND
                 value: alpaca-mcp-server
+              - key: MISSION_CONTROL_URL
+                value: https://mission-control-3cqw.onrender.com
+              - key: MISSION_CONTROL_PROJECT
+                value: alpaca-competition
+              - key: MISSION_CONTROL_REPORTING_INTERVAL_MINUTES
+                value: "60"
+              - key: MISSION_CONTROL_ENVIRONMENT
+                value: production
               # Secret values are managed in the Render dashboard. Omitting them
               # here preserves dashboard values across Blueprint syncs.
               - key: OPENAI_MODEL
@@ -65,6 +73,9 @@ projects:
                 fromDatabase:
                   name: money-machine-db
                   property: connectionString
+              # Set this per-project bearer token manually in the Render dashboard.
+              - key: MISSION_CONTROL_TOKEN
+                sync: false
               - fromGroup: Money Machine
 
         databases:

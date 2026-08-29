@@ -1,5 +1,6 @@
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -8,6 +9,12 @@ from uuid import uuid4
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.exc import IntegrityError
 
+from money_machine.domain.clock import (
+    BASELINE_EQUITY,
+    EOD_EQUITY_SNAPSHOT_AT,
+    SCORING_STARTS_AT,
+    scoring_window_state,
+)
 from money_machine.domain.enums import ExecutionState, RunMode
 from money_machine.domain.schemas import (
     AccountSnapshot,
@@ -40,6 +47,17 @@ from money_machine.persistence.models import (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class PersistedEquitySnapshot:
+    id: int
+    observed_at: datetime
+    equity: Decimal
+    cash: Decimal
+    portfolio_value: Decimal
+    realized_pl: Decimal
+    unrealized_pl: Decimal
+
+
 class AuditRepository:
     def __init__(self, database: Database) -> None:
         self.database = database
@@ -68,38 +86,22 @@ class AuditRepository:
                     raise
                 return existing.id, False
 
-    def persist_observation(
+    def persist_account_checkpoint(
         self,
         run_id: str,
         *,
-        source: str,
-        snapshots: list[UnderlyingSnapshot],
         account: AccountSnapshot,
         official: bool,
         peak_equity: Decimal,
         positions: list[dict[str, Any]],
-        observed_at: datetime | None = None,
+        observed_at: datetime,
     ) -> None:
-        now = observed_at or max(snapshot.observed_at for snapshot in snapshots)
         with self.database.session() as session:
-            for snapshot in snapshots:
-                features = snapshot.model_dump(mode="json")
-                features["richness_ratio"] = str(snapshot.richness_ratio)
-                session.add(
-                    MarketSnapshotORM(
-                        agent_run_id=run_id,
-                        observed_at=snapshot.observed_at,
-                        source=source,
-                        symbol=snapshot.symbol,
-                        features_json=features,
-                        raw_hash=_hash(features),
-                    )
-                )
             drawdown = max(Decimal("0"), peak_equity - account.equity)
             session.add(
                 EquitySnapshotORM(
                     agent_run_id=run_id,
-                    observed_at=now,
+                    observed_at=observed_at,
                     equity=account.equity,
                     cash=account.cash,
                     buying_power=account.buying_power,
@@ -116,7 +118,7 @@ class AuditRepository:
                 session.add(
                     PositionSnapshotORM(
                         agent_run_id=run_id,
-                        observed_at=now,
+                        observed_at=observed_at,
                         broker_position_id=str(
                             safe.get("asset_id") or safe.get("symbol") or "unknown"
                         ),
@@ -125,6 +127,28 @@ class AuditRepository:
                         market_value=Decimal(str(safe.get("market_value") or 0)),
                         unrealized_pl=Decimal(str(safe.get("unrealized_pl") or 0)),
                         raw_hash=_hash(safe),
+                    )
+                )
+
+    def persist_market_observations(
+        self,
+        run_id: str,
+        *,
+        source: str,
+        snapshots: list[UnderlyingSnapshot],
+    ) -> None:
+        with self.database.session() as session:
+            for snapshot in snapshots:
+                features = snapshot.model_dump(mode="json")
+                features["richness_ratio"] = str(snapshot.richness_ratio)
+                session.add(
+                    MarketSnapshotORM(
+                        agent_run_id=run_id,
+                        observed_at=snapshot.observed_at,
+                        source=source,
+                        symbol=snapshot.symbol,
+                        features_json=features,
+                        raw_hash=_hash(features),
                     )
                 )
 
@@ -308,6 +332,9 @@ class AuditRepository:
                 if order is not None:
                     leaves = Decimal(str(activity.get("leaves_qty") or 0))
                     order.status = "filled" if leaves == 0 else "partially_filled"
+                    raw_json = dict(order.raw_json)
+                    raw_json["remaining_quantity"] = str(leaves)
+                    order.raw_json = raw_json
                     order.last_seen_at = _safe_datetime(
                         activity.get("transaction_time") or activity.get("date")
                     )
@@ -316,7 +343,9 @@ class AuditRepository:
         managed: list[ManagedOrder] = []
         with self.database.session() as session:
             rows = session.scalars(
-                select(BrokerOrderORM).where(BrokerOrderORM.status == "submitted")
+                select(BrokerOrderORM).where(
+                    BrokerOrderORM.status.in_(("submitted", "partially_filled"))
+                )
             )
             for row in rows:
                 request = row.raw_json.get("request", {})
@@ -324,6 +353,9 @@ class AuditRepository:
                 if not row.broker_order_id or not isinstance(raw_legs, list) or not raw_legs:
                     continue
                 if row.submitted_at is None:
+                    continue
+                remaining = int(Decimal(str(row.raw_json.get("remaining_quantity", row.quantity))))
+                if remaining < 1:
                     continue
                 managed.append(
                     ManagedOrder(
@@ -333,6 +365,7 @@ class AuditRepository:
                         broker_order_id=row.broker_order_id,
                         status=row.status,
                         quantity=row.quantity,
+                        remaining_quantity=remaining,
                         original_limit=row.limit_price,
                         attempt=row.attempt,
                         submitted_at=_safe_datetime(row.submitted_at),
@@ -363,7 +396,9 @@ class AuditRepository:
                     ModelDecisionORM,
                     ModelDecisionORM.agent_run_id == BrokerOrderORM.agent_run_id,
                 )
-                .where(BrokerOrderORM.status.in_(("filled", "closing")))
+                .where(
+                    BrokerOrderORM.status.in_(("filled", "closing", "partially_filled_canceled"))
+                )
             )
             for order, candidate, structure, decision in rows:
                 request = order.raw_json.get("request", {})
@@ -459,7 +494,13 @@ class AuditRepository:
                 )
                 or fallback_equity
             )
-            open_statuses = ("submitted", "partially_filled", "filled", "closing")
+            open_statuses = (
+                "submitted",
+                "partially_filled",
+                "partially_filled_canceled",
+                "filled",
+                "closing",
+            )
             open_loss = session.scalar(
                 select(func.coalesce(func.sum(RiskDecisionORM.awarded_risk), 0))
                 .join(
@@ -502,6 +543,150 @@ class AuditRepository:
                 "pending_underlyings": frozenset(pending),
             }
 
+    def latest_official_equity_at_or_before(
+        self, observed_at: datetime, *, account_fingerprint: str | None = None
+    ) -> PersistedEquitySnapshot | None:
+        with self.database.session() as session:
+            query = (
+                select(EquitySnapshotORM)
+                .join(AgentRunORM, AgentRunORM.id == EquitySnapshotORM.agent_run_id)
+                .where(
+                    EquitySnapshotORM.official,
+                    EquitySnapshotORM.observed_at >= SCORING_STARTS_AT,
+                    EquitySnapshotORM.observed_at <= EOD_EQUITY_SNAPSHOT_AT,
+                    EquitySnapshotORM.observed_at <= observed_at,
+                )
+                .order_by(desc(EquitySnapshotORM.observed_at), desc(EquitySnapshotORM.id))
+                .limit(1)
+            )
+            if account_fingerprint:
+                query = query.where(
+                    AgentRunORM.passport_json["account"]["fingerprint"].as_string()
+                    == account_fingerprint
+                )
+            row = session.scalar(query)
+            return _persisted_equity(row)
+
+    def first_official_equity_at_or_after(
+        self, observed_at: datetime, *, account_fingerprint: str | None = None
+    ) -> PersistedEquitySnapshot | None:
+        with self.database.session() as session:
+            query = (
+                select(EquitySnapshotORM)
+                .join(AgentRunORM, AgentRunORM.id == EquitySnapshotORM.agent_run_id)
+                .where(
+                    EquitySnapshotORM.official,
+                    EquitySnapshotORM.observed_at >= SCORING_STARTS_AT,
+                    EquitySnapshotORM.observed_at <= EOD_EQUITY_SNAPSHOT_AT,
+                    EquitySnapshotORM.observed_at >= observed_at,
+                )
+                .order_by(EquitySnapshotORM.observed_at, EquitySnapshotORM.id)
+                .limit(1)
+            )
+            if account_fingerprint:
+                query = query.where(
+                    AgentRunORM.passport_json["account"]["fingerprint"].as_string()
+                    == account_fingerprint
+                )
+            row = session.scalar(query)
+            return _persisted_equity(row)
+
+    def competition_performance_summary(
+        self,
+        *,
+        account_fingerprint: str | None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        observed_at = (now or datetime.now(UTC)).astimezone(UTC)
+        empty = {
+            "available": False,
+            "starting_equity": str(BASELINE_EQUITY),
+            "latest_equity": None,
+            "dollar_pnl": None,
+            "percentage_return": None,
+            "peak_equity": None,
+            "maximum_drawdown": None,
+            "maximum_drawdown_percent": None,
+            "latest_snapshot_at": None,
+            "open_position_count": None,
+            "working_order_count": None,
+            "broker_confirmed_flat": None,
+            "scoring_window_state": scoring_window_state(observed_at),
+            "result_status": "unavailable",
+            "alpaca_authoritative_notice": (
+                "Alpaca account equity remains authoritative for the official result."
+            ),
+        }
+        if not account_fingerprint:
+            return empty
+        with self.database.session() as session:
+            rows = list(
+                session.execute(
+                    select(EquitySnapshotORM, AgentRunORM.passport_json)
+                    .join(AgentRunORM, AgentRunORM.id == EquitySnapshotORM.agent_run_id)
+                    .where(
+                        EquitySnapshotORM.official,
+                        EquitySnapshotORM.observed_at >= SCORING_STARTS_AT,
+                        EquitySnapshotORM.observed_at <= EOD_EQUITY_SNAPSHOT_AT,
+                        AgentRunORM.passport_json["account"]["fingerprint"].as_string()
+                        == account_fingerprint,
+                    )
+                    .order_by(EquitySnapshotORM.observed_at, EquitySnapshotORM.id)
+                )
+            )
+        if not rows:
+            return empty
+        snapshots = [row for row, _passport in rows]
+        latest, latest_passport = rows[-1]
+        peak = BASELINE_EQUITY
+        maximum_drawdown = Decimal("0")
+        for snapshot in snapshots:
+            peak = max(peak, snapshot.equity)
+            maximum_drawdown = max(maximum_drawdown, peak - snapshot.equity)
+        pnl = latest.equity - BASELINE_EQUITY
+        percentage_return = (pnl / BASELINE_EQUITY * Decimal("100")).quantize(Decimal("0.0001"))
+        maximum_drawdown_percent = (
+            maximum_drawdown / peak * Decimal("100") if peak else Decimal("0")
+        ).quantize(Decimal("0.0001"))
+        account = latest_passport.get("account", {}) if isinstance(latest_passport, dict) else {}
+        latest_at = _safe_datetime(latest.observed_at)
+        return {
+            **empty,
+            "available": True,
+            "latest_equity": str(latest.equity),
+            "dollar_pnl": str(pnl),
+            "percentage_return": str(percentage_return),
+            "peak_equity": str(peak),
+            "maximum_drawdown": str(maximum_drawdown),
+            "maximum_drawdown_percent": str(maximum_drawdown_percent),
+            "latest_snapshot_at": latest_at.isoformat(),
+            "open_position_count": int(account.get("open_position_count", 0)),
+            "working_order_count": int(account.get("working_order_count", 0)),
+            "broker_confirmed_flat": bool(account.get("broker_confirmed_flat", False)),
+            "result_status": (
+                "final_eod_snapshot" if latest_at == EOD_EQUITY_SNAPSHOT_AT else "provisional"
+            ),
+        }
+
+    def official_equity_curve(self, *, account_fingerprint: str | None) -> list[EquitySnapshotORM]:
+        if not account_fingerprint:
+            return []
+        with self.database.session() as session:
+            return list(
+                session.scalars(
+                    select(EquitySnapshotORM)
+                    .join(AgentRunORM, AgentRunORM.id == EquitySnapshotORM.agent_run_id)
+                    .where(
+                        EquitySnapshotORM.official,
+                        EquitySnapshotORM.observed_at >= SCORING_STARTS_AT,
+                        EquitySnapshotORM.observed_at <= EOD_EQUITY_SNAPSHOT_AT,
+                        AgentRunORM.passport_json["account"]["fingerprint"].as_string()
+                        == account_fingerprint,
+                    )
+                    .order_by(EquitySnapshotORM.observed_at, EquitySnapshotORM.id)
+                )
+            )
+
     def reconcile_broker_state(
         self,
         orders: list[dict[str, Any]],
@@ -531,6 +716,10 @@ class AuditRepository:
                     local_order.last_seen_at = _safe_datetime(
                         broker_order.get("updated_at") or broker_order.get("submitted_at") or now
                     )
+                    remaining = _remaining_order_quantity(broker_order, local_order.quantity)
+                    raw_json = dict(local_order.raw_json)
+                    raw_json["remaining_quantity"] = str(remaining)
+                    local_order.raw_json = raw_json
             for position in positions:
                 symbol = str(position.get("symbol") or "")
                 if symbol and symbol not in known_symbols:
@@ -800,3 +989,26 @@ def _safe_datetime(value: Any) -> datetime:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
+
+
+def _persisted_equity(row: EquitySnapshotORM | None) -> PersistedEquitySnapshot | None:
+    if row is None:
+        return None
+    return PersistedEquitySnapshot(
+        id=row.id,
+        observed_at=_safe_datetime(row.observed_at),
+        equity=row.equity,
+        cash=row.cash,
+        portfolio_value=row.portfolio_value,
+        realized_pl=row.realized_pl,
+        unrealized_pl=row.unrealized_pl,
+    )
+
+
+def _remaining_order_quantity(payload: dict[str, Any], fallback: int) -> Decimal:
+    explicit = payload.get("remaining_qty") or payload.get("leaves_qty")
+    if explicit is not None:
+        return max(Decimal("0"), Decimal(str(explicit)))
+    quantity = Decimal(str(payload.get("qty") or fallback))
+    filled = Decimal(str(payload.get("filled_qty") or 0))
+    return max(Decimal("0"), quantity - filled)

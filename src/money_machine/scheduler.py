@@ -8,6 +8,8 @@ from uuid import uuid4
 import structlog
 
 from money_machine.adapters.alpaca_mcp import AlpacaMcpV2Adapter
+from money_machine.business_reporting import BusinessReportingOrchestrator
+from money_machine.domain.clock import FORCED_FLATTEN_STARTS_AT
 from money_machine.domain.enums import RunMode
 from money_machine.model_provider import DeterministicModelProvider, OpenAIModelProvider
 from money_machine.persistence.repository import AuditRepository
@@ -31,11 +33,17 @@ async def run_scheduler(
             loop.add_signal_handler(signal_name, stop.set)
     owner = f"{socket.gethostname()}-{uuid4().hex[:10]}"
     service = AgentService(settings, repository)
+    business_reporting = BusinessReportingOrchestrator(settings, repository)
     model = _model(settings)
+    broker_confirmed_flat = False
     async with AlpacaMcpV2Adapter(settings) as adapter:
         while not stop.is_set():
-            now = datetime.now(UTC)
-            if not repository.acquire_scheduler_lease(name="trading-loop", owner_id=owner, now=now):
+            now = datetime.now(UTC).replace(second=0, microsecond=0)
+            liquidation_recovery = now >= FORCED_FLATTEN_STARTS_AT and not broker_confirmed_flat
+            lease_ttl = 90 if liquidation_recovery else 360
+            if not repository.acquire_scheduler_lease(
+                name="trading-loop", owner_id=owner, now=now, ttl_seconds=lease_ttl
+            ):
                 logger.warning("scheduler_lease_unavailable")
                 if once:
                     return
@@ -52,9 +60,19 @@ async def run_scheduler(
                     approved=outcome.approved,
                     submitted=outcome.order_submitted,
                 )
+                broker_confirmed_flat = bool(
+                    outcome.passport.get("account", {}).get("broker_confirmed_flat", False)
+                )
+                await asyncio.to_thread(
+                    business_reporting.report_if_due,
+                    now=datetime.now(UTC),
+                )
             if once:
                 return
-            delay = 300 - (datetime.now(UTC).timestamp() % 300)
+            interval = scheduler_interval_seconds(
+                datetime.now(UTC), broker_confirmed_flat=broker_confirmed_flat
+            )
+            delay = interval - (datetime.now(UTC).timestamp() % interval)
             with suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=delay)
 
@@ -69,3 +87,12 @@ def _model(settings: Settings) -> ModelProvider:
     if settings.model_provider in {"deterministic", "replay"}:
         return DeterministicModelProvider()
     raise ValueError(f"unsupported MODEL_PROVIDER: {settings.model_provider}")
+
+
+def scheduler_interval_seconds(now: datetime, *, broker_confirmed_flat: bool) -> int:
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("scheduler time must include a timezone")
+    liquidation_recovery = (
+        now.astimezone(UTC) >= FORCED_FLATTEN_STARTS_AT and not broker_confirmed_flat
+    )
+    return 60 if liquidation_recovery else 300

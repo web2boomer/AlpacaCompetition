@@ -143,7 +143,9 @@ async def run_production_acceptance(
             if isinstance(now_text, str):
                 now = datetime.fromisoformat(now_text.replace("Z", "+00:00"))
                 observed_at = now.astimezone(UTC)
-                clock_state = competition_clock(now, has_positions=bool(positions)).state
+                clock_state = competition_clock(
+                    now, has_exposure=bool(positions) or bool(orders)
+                ).state
                 acceptance_window = (
                     clock_state in {ExecutionState.OBSERVE_ONLY, ExecutionState.FULL_EXECUTION}
                     and observed_at < NEW_ENTRY_CUTOFF
