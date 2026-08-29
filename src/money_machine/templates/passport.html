@@ -3,6 +3,7 @@
 {% block content %}
 {% set decision = passport.get('decision', {}) %}
 {% set risk = passport.get('risk', {}) %}
+{% set validation = passport.get('model_validation', {}) %}
 <section class="passport-hero shell">
   <a class="back" href="/">← Dashboard</a>
   <div class="eyebrow-row"><span class="eyebrow">Decision Passport</span><span class="mode-badge">{{ passport.get('result_label') }}</span></div>
@@ -14,7 +15,7 @@
 <section class="shell timeline section-gap">
   <article class="timeline-step"><div class="step-no">1</div><div><span class="kicker">Observe</span><h2>Market evidence</h2><div class="evidence-table">{% for item in passport.get('evidence', []) %}<div><strong>{{ item.symbol }}</strong><span>{{ item.spot|money }}</span><span>{{ item.implied_move_pct|pct }} implied</span><span>{{ item.richness_ratio|default(0)|float|round(2) }}× richness</span></div>{% endfor %}</div></div></article>
   <article class="timeline-step"><div class="step-no">2</div><div><span class="kicker">Auction</span><h2>{{ passport.get('candidates', [])|length }} defined-risk candidates</h2>{% for item in passport.get('candidates', []) %}<div class="passport-card"><strong>{{ item.candidate_id }}</strong><span>{{ item.structure.maximum_loss|money }} max loss</span></div>{% endfor %}</div></article>
-  <article class="timeline-step"><div class="step-no">3</div><div><span class="kicker">Select</span><h2>{{ (decision.get('confidence', 0) * 100)|round|int }}% model confidence</h2><p>The model selected only a supplied candidate ID. Schema fallback used: {{ passport.get('model_validation', {}).get('fallback_used', false)|string|lower }}.</p></div></article>
+  <article class="timeline-step"><div class="step-no">3</div><div><span class="kicker">Select</span><h2>{{ (decision.get('confidence', 0) * 100)|round|int }}% model confidence</h2><p>Provider: {{ validation.get('provider', 'unknown') }}{% if validation.get('model') %} · model: {{ validation.model }}{% endif %}. Schema fallback used: {{ validation.get('fallback_used', false)|string|lower }}{% if validation.get('provider_response_id_hash') %} · response proof: {{ validation.provider_response_id_hash[:12] }}{% endif %}.</p></div></article>
   <article class="timeline-step"><div class="step-no">4</div><div><span class="kicker">Govern</span><h2>{{ 'Risk awarded' if risk.get('approved') else 'Entry refused' }} · {{ risk.get('awarded_risk', 0)|money }}</h2><div class="reason-row">{% for reason in risk.get('reason_codes', []) %}<span>{{ reason|replace('_', ' ') }}</span>{% endfor %}</div></div></article>
   <article class="timeline-step"><div class="step-no">5</div><div><span class="kicker">Execute & reconcile</span><h2>{{ passport.get('execution', {}).get('status', 'not submitted')|replace('_', ' ') }}</h2><p>{{ passport.get('execution', {}).get('order_type', 'No order') }} · quantity {{ passport.get('execution', {}).get('quantity', 0) }} · reconciliation {{ 'clean' if passport.get('operational_state', {}).get('reconciliation_clean') else 'halted' }}</p></div></article>
   <article class="timeline-step"><div class="step-no">6</div><div><span class="kicker">Outcome</span><h2>{{ passport.get('outcome', {}).get('equity', 0)|money }} equity</h2><p>{{ passport.get('counterfactuals', {}).get('label') }}. Replay values never enter the official scoreboard.</p></div></article>

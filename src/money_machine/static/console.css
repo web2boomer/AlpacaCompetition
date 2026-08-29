@@ -1,7 +1,6 @@
 /* Live operations console */
-.ops-header{padding:48px 0 28px;display:flex;align-items:flex-end;justify-content:space-between;gap:40px}
+.ops-header{padding:44px 0 28px;display:flex;align-items:flex-end;justify-content:space-between;gap:40px}
 .ops-header h1{font-size:clamp(38px,5vw,64px);line-height:1;letter-spacing:-.055em;margin:10px 0 8px}
-.ops-header p{margin:0;color:var(--muted);font-size:14px}
 .refresh-card{min-width:250px;border-left:1px solid var(--line);padding-left:22px;display:flex;flex-direction:column;gap:7px;color:var(--muted);font:10px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.06em}
 .live-indicator{display:flex;align-items:center;gap:8px;color:var(--acid)}
 .live-indicator i{width:7px;height:7px;border-radius:50%;background:var(--acid);box-shadow:0 0 14px var(--acid);animation:console-pulse 2s ease-in-out infinite}
@@ -27,6 +26,11 @@
 .decision-workspace{grid-template-columns:1.15fr .85fr}
 .decision-workspace .panel{min-height:310px}
 .text-link{display:inline-flex;margin-top:22px;color:#294e35;font-size:11px;font-weight:750;text-decoration:none;border-bottom:1px solid rgba(41,78,53,.3);padding-bottom:3px}
+.decision-provenance{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.provider-badge{border:1px solid rgba(41,78,53,.22);border-radius:100px;padding:6px 8px;color:#467e4d;font:8px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+.footer-links{display:flex;gap:18px}
+.footer a{color:inherit;text-decoration:none;border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:2px}
+.footer a:hover{color:var(--paper)}
 .guardrail-panel{margin-bottom:56px}
 @media(max-width:900px){.ops-header{align-items:flex-start}.ops-grid,.decision-workspace{grid-template-columns:1fr}.activity-panel{min-height:0}.activity-feed{max-height:300px}}
 @media(max-width:600px){.ops-header{padding-top:32px;flex-direction:column;align-items:stretch;gap:22px}.refresh-card{border-left:0;border-top:1px solid var(--line);padding:15px 0 0}.activity-entry{grid-template-columns:60px minmax(0,1fr)}.activity-status{display:none}.ops-chart-panel{min-height:330px;padding:22px 18px}.ops-equity-chart{min-height:150px}.ops-metrics{margin-top:14px}}

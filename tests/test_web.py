@@ -17,9 +17,12 @@ def test_dashboard_and_health(settings, database) -> None:
         passport = client.get("/api/passports/latest")
         activity = client.get("/api/activity")
     assert response.status_code == 200
-    assert "Live competition operations" in response.text
+    assert "Money Machine" in response.text
     assert "Recent agent activity" in response.text
     assert "Last update" in response.text
+    assert "System health" in response.text
+    assert "https://aob.io" in response.text
+    assert '<header class="nav shell">' not in response.text
     assert "window.setInterval(refresh, intervalMs)" in response.text
     assert "REPLAY — NOT OFFICIAL P&amp;L" in response.text
     assert health.status_code == 200

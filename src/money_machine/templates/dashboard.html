@@ -1,16 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Money Machine · Live Competition Console{% endblock %}
+{% block header %}{% endblock %}
 {% block content %}
 {% set account = passport.get('account', {}) %}
 {% set state = passport.get('operational_state', {}) %}
 {% set decision = passport.get('decision', {}) %}
 {% set risk = passport.get('risk', {}) %}
 {% set execution = passport.get('execution', {}) %}
+{% set model_validation = passport.get('model_validation', {}) %}
 <section class="ops-header shell">
   <div>
-    <span class="eyebrow">Live competition operations</span>
     <h1>Money Machine</h1>
-    <p>Paper-account state, decisions, risk gates, and execution activity.</p>
   </div>
   <div class="refresh-card" aria-live="polite">
     <span class="live-indicator"><i></i><strong id="connection-state">Live</strong></span>
@@ -98,7 +98,10 @@
   </article>
 
   <article class="panel decision-panel">
-    <span class="kicker">Latest model decision</span>
+    <div class="decision-provenance">
+      <span class="kicker">Latest model decision</span>
+      <span class="provider-badge">{{ model_validation.get('provider', 'unknown') }}{% if model_validation.get('model') %} · {{ model_validation.model }}{% endif %}</span>
+    </div>
     <h2>“{{ decision.get('thesis', 'No valid model decision was available.') }}”</h2>
     <div class="confidence"><span style="width: {{ decision.get('confidence', 0) * 100 }}%"></span></div>
     <div class="split-list">

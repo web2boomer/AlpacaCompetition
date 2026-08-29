@@ -9,7 +9,13 @@ from money_machine.domain.enums import Action, Regime
 from money_machine.domain.schemas import Candidate, ModelDecision, ModelDecisionEnvelope
 
 
-def safe_model_decision(payload: Any) -> ModelDecisionEnvelope:
+def safe_model_decision(
+    payload: Any,
+    *,
+    provider: str = "deterministic",
+    model: str | None = None,
+    provider_response_id: str | None = None,
+) -> ModelDecisionEnvelope:
     try:
         canonical = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
     except (TypeError, ValueError):
@@ -17,7 +23,17 @@ def safe_model_decision(payload: Any) -> ModelDecisionEnvelope:
     digest = hashlib.sha256(canonical.encode()).hexdigest()
     try:
         decision = ModelDecision.model_validate(payload)
-        return ModelDecisionEnvelope(decision=decision, raw_response_hash=digest)
+        return ModelDecisionEnvelope(
+            decision=decision,
+            raw_response_hash=digest,
+            provider=provider,
+            model=model,
+            provider_response_id_hash=(
+                hashlib.sha256(provider_response_id.encode()).hexdigest()
+                if provider_response_id
+                else None
+            ),
+        )
     except (ValidationError, TypeError, ValueError) as exc:
         return ModelDecisionEnvelope(
             decision=ModelDecision.abstention(
@@ -25,10 +41,19 @@ def safe_model_decision(payload: Any) -> ModelDecisionEnvelope:
             ),
             raw_response_hash=digest,
             validation_error=type(exc).__name__,
+            provider=provider,
+            model=model,
+            provider_response_id_hash=(
+                hashlib.sha256(provider_response_id.encode()).hexdigest()
+                if provider_response_id
+                else None
+            ),
         )
 
 
 class DeterministicModelProvider:
+    provider_name = "deterministic"
+
     def __init__(self, scripted_payload: dict[str, Any] | None = None) -> None:
         self.scripted_payload = scripted_payload
 
@@ -41,7 +66,7 @@ class DeterministicModelProvider:
     ) -> ModelDecisionEnvelope:
         del market_context, portfolio_context
         if self.scripted_payload is not None:
-            return safe_model_decision(self.scripted_payload)
+            return safe_model_decision(self.scripted_payload, provider=self.provider_name)
         if not candidates:
             return safe_model_decision(
                 {
@@ -56,7 +81,8 @@ class DeterministicModelProvider:
                     "evidence": ["The precompiled candidate set was empty."],
                     "invalidation": ["Re-evaluate after fresh complete option-chain data arrives."],
                     "maximum_holding_minutes": 0,
-                }
+                },
+                provider=self.provider_name,
             )
         selected = candidates[0]
         regime = {
@@ -80,12 +106,15 @@ class DeterministicModelProvider:
                     "risk capacity changes."
                 ],
                 "maximum_holding_minutes": 360,
-            }
+            },
+            provider=self.provider_name,
         )
 
 
 class ReplayModelProvider(DeterministicModelProvider):
     """Offline replay name retained for fixtures and explicit replay mode."""
+
+    provider_name = "replay"
 
 
 class OpenAIModelProvider:
@@ -127,12 +156,24 @@ class OpenAIModelProvider:
             )
             parsed = response.output_parsed
             if parsed is None:
-                return safe_model_decision(None)
-            return safe_model_decision(parsed.model_dump(mode="json"))
+                return safe_model_decision(
+                    None,
+                    provider="openai",
+                    model=str(response.model),
+                    provider_response_id=str(response.id),
+                )
+            return safe_model_decision(
+                parsed.model_dump(mode="json"),
+                provider="openai",
+                model=str(response.model),
+                provider_response_id=str(response.id),
+            )
         except Exception as exc:  # provider failures must fail closed
             digest = hashlib.sha256(type(exc).__name__.encode()).hexdigest()
             return ModelDecisionEnvelope(
                 decision=ModelDecision.abstention("Model provider unavailable; cycle abstained."),
                 raw_response_hash=digest,
                 validation_error=type(exc).__name__,
+                provider="openai",
+                model=self.model,
             )

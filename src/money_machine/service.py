@@ -495,6 +495,9 @@ def _passport(
         "auction": auction.model_dump(mode="json"),
         "decision": envelope.decision.model_dump(mode="json"),
         "model_validation": {
+            "provider": envelope.provider,
+            "model": envelope.model,
+            "provider_response_id_hash": envelope.provider_response_id_hash,
             "raw_response_hash": envelope.raw_response_hash,
             "fallback_used": envelope.validation_error is not None,
             "error_type": envelope.validation_error,

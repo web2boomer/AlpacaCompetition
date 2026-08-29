@@ -1,6 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -158,6 +158,9 @@ class ModelDecisionEnvelope(StrictModel):
     decision: ModelDecision
     raw_response_hash: str
     validation_error: str | None = None
+    provider: Literal["deterministic", "replay", "openai"] = "deterministic"
+    model: str | None = None
+    provider_response_id_hash: str | None = None
 
 
 class RiskCheck(StrictModel):
