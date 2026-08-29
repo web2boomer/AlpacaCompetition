@@ -38,7 +38,7 @@ projects:
             dockerContext: .
             dockerCommand: money-machine serve --host 0.0.0.0 --port 8000
             preDeployCommand: money-machine db upgrade
-            healthCheckPath: /api/health
+            healthCheckPath: /api/liveness
             autoDeployTrigger: checksPass
             maxShutdownDelaySeconds: 30
             numInstances: 1

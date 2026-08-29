@@ -138,6 +138,18 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         }
         return JSONResponse(payload, status_code=200 if healthy else 503)
 
+    @app.get("/api/liveness")
+    async def liveness() -> JSONResponse:
+        database_ok = db.healthcheck()
+        return JSONResponse(
+            {
+                "status": "alive" if database_ok else "unavailable",
+                "database": "ok" if database_ok else "failed",
+                "timestamp": datetime.now(UTC).isoformat(),
+            },
+            status_code=200 if database_ok else 503,
+        )
+
     return app
 
 

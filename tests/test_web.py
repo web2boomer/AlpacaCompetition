@@ -14,6 +14,7 @@ def test_dashboard_and_health(settings, database) -> None:
     with TestClient(create_app(settings, database)) as client:
         response = client.get("/")
         health = client.get("/api/health")
+        liveness = client.get("/api/liveness")
         passport = client.get("/api/passports/latest")
         activity = client.get("/api/activity")
     assert response.status_code == 200
@@ -26,6 +27,8 @@ def test_dashboard_and_health(settings, database) -> None:
     assert "window.setInterval(refresh, intervalMs)" in response.text
     assert "REPLAY — NOT OFFICIAL P&amp;L" in response.text
     assert health.status_code == 200
+    assert liveness.status_code == 200
+    assert liveness.json()["database"] == "ok"
     assert health.json()["database"] == "ok"
     assert passport.status_code == 200
     assert passport.json()["official"] is False
