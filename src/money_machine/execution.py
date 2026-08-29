@@ -14,6 +14,10 @@ STALE_AFTER = timedelta(seconds=90)
 MAX_REPRICE_ATTEMPTS = 2
 REPRICE_INCREMENT = Decimal("0.05")
 MAX_TOTAL_CONCESSION = Decimal("0.10")
+CREDIT_TAKE_PROFIT_FRACTION = Decimal("0.50")
+CREDIT_STOP_LOSS_MULTIPLE = Decimal("2.00")
+DEBIT_TAKE_PROFIT_MULTIPLE = Decimal("1.50")
+DEBIT_STOP_VALUE_FRACTION = Decimal("0.65")
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +51,16 @@ class ManagedStructure:
     broker_order_id: str
     status: str
     quantity: int
+    opened_at: datetime
+    maximum_holding_minutes: int
     structure: OptionStructure
+
+
+@dataclass(frozen=True, slots=True)
+class StructureExitSignal:
+    should_close: bool
+    reason: str
+    executable_price: Decimal | None
 
 
 def stale_order_action(
@@ -89,6 +102,56 @@ def replacement_request(
     )
 
 
+def structure_exit_signal(
+    managed: ManagedStructure,
+    *,
+    quotes: dict[str, OptionQuote],
+    now: datetime,
+    force_close_reason: str | None = None,
+) -> StructureExitSignal:
+    """Evaluate deterministic profit, loss, holding-time, and portfolio exits."""
+    if force_close_reason is not None:
+        return StructureExitSignal(True, force_close_reason, None)
+    if managed.maximum_holding_minutes > 0 and now >= managed.opened_at + timedelta(
+        minutes=managed.maximum_holding_minutes
+    ):
+        return StructureExitSignal(True, "maximum_holding_time", None)
+
+    cash_required = _closing_cash_required(managed, quotes)
+    if cash_required is None:
+        return StructureExitSignal(False, "incomplete_close_quotes", None)
+    opening_price = managed.structure.net_price
+    if managed.structure.is_credit:
+        close_debit = max(Decimal("0"), cash_required)
+        if close_debit <= opening_price * CREDIT_TAKE_PROFIT_FRACTION:
+            return StructureExitSignal(True, "credit_take_profit", close_debit)
+        if close_debit >= opening_price * CREDIT_STOP_LOSS_MULTIPLE:
+            return StructureExitSignal(True, "credit_stop_loss", close_debit)
+        return StructureExitSignal(False, "credit_exit_not_reached", close_debit)
+
+    close_credit = max(Decimal("0"), -cash_required)
+    if close_credit >= opening_price * DEBIT_TAKE_PROFIT_MULTIPLE:
+        return StructureExitSignal(True, "debit_take_profit", close_credit)
+    if close_credit <= opening_price * DEBIT_STOP_VALUE_FRACTION:
+        return StructureExitSignal(True, "debit_stop_loss", close_credit)
+    return StructureExitSignal(False, "debit_exit_not_reached", close_credit)
+
+
+def _closing_cash_required(
+    managed: ManagedStructure, quotes: dict[str, OptionQuote]
+) -> Decimal | None:
+    cash_required = Decimal("0")
+    for opening_leg in managed.structure.legs:
+        quote = quotes.get(opening_leg.symbol)
+        if quote is None:
+            return None
+        if opening_leg.side is Side.SELL:
+            cash_required += quote.ask * opening_leg.ratio_qty
+        else:
+            cash_required -= quote.bid * opening_leg.ratio_qty
+    return cash_required
+
+
 def close_request(
     managed: ManagedStructure,
     *,
@@ -98,19 +161,19 @@ def close_request(
     environment_role: str,
 ) -> BrokerOrderRequest:
     close_legs: list[OptionLeg] = []
-    cash_required = Decimal("0")
+    cash_required = _closing_cash_required(managed, quotes)
+    if cash_required is None:
+        raise ValueError("cannot close structure without a current quote for every leg")
     for opening_leg in managed.structure.legs:
         quote = quotes.get(opening_leg.symbol)
-        if quote is None:
-            raise ValueError("cannot close structure without a current quote for every leg")
+        if quote is None:  # narrowed by _closing_cash_required
+            raise AssertionError("missing quote after complete close-price calculation")
         if opening_leg.side is Side.SELL:
             side = Side.BUY
             intent = PositionIntent.BUY_TO_CLOSE
-            cash_required += quote.ask * opening_leg.ratio_qty
         else:
             side = Side.SELL
             intent = PositionIntent.SELL_TO_CLOSE
-            cash_required -= quote.bid * opening_leg.ratio_qty
         close_legs.append(
             opening_leg.model_copy(
                 update={

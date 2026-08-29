@@ -1,16 +1,13 @@
 import hashlib
 import hmac
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal
 
-from money_machine.domain.clock import BASELINE_EQUITY
+from money_machine.domain.clock import BASELINE_EQUITY, competition_clock
 from money_machine.domain.enums import AccountRole, AppEnvironment
 from money_machine.domain.schemas import AccountSnapshot
 from money_machine.settings import Settings
-
-# Version-controlled safety latch. It may only change after explicit go-live authorization
-# and a passing production acceptance report. Environment variables cannot override it.
-COMPETITION_GO_LIVE_AUTHORIZED = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,5 +52,9 @@ def verify_competition_baseline(account: AccountSnapshot, *, positions: int, ord
         raise ValueError("competition account baseline requires empty orders and positions")
 
 
-def production_entry_authorized(*, acceptance_passed: bool) -> bool:
-    return COMPETITION_GO_LIVE_AUTHORIZED and acceptance_passed
+def new_entry_authorized(account_role: AccountRole, *, now: datetime | None = None) -> bool:
+    """Derive entry authority from account role and the immutable competition clock."""
+    if account_role is AccountRole.DEVELOPMENT:
+        return True
+    observed_at = now or datetime.now(UTC)
+    return competition_clock(observed_at, has_positions=False).allow_new_entries

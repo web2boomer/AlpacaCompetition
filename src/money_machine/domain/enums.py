@@ -83,7 +83,6 @@ class RiskReason(StrEnum):
     ZERO_QUANTITY = "calculated_quantity_zero"
     DUPLICATE_CYCLE = "duplicate_cycle"
     DUPLICATE_ORDER = "duplicate_order"
-    ACCEPTANCE_BLOCKED = "production_acceptance_blocked"
 
 
 class OrderStatus(StrEnum):

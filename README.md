@@ -2,7 +2,7 @@
 
 Money Machine is an auditable autonomous options agent for the Alpaca AI Trading Agents Hackathon, Options Alpha Agents track. It observes a paper account and liquid index options through Alpaca MCP Server V2, compiles only defined-risk structures, lets a structured model choose among candidate IDs or abstain, applies deterministic risk policy, reconciles broker state, and publishes a Decision Passport.
 
-The application is built to fail closed. A missing quote, invalid model response, stale chain, account mismatch, live endpoint, unexplained position, kill switch, time cutoff, or risk-cap breach prevents a new entry. Competition execution is additionally blocked by a version-controlled go-live latch until the owner explicitly authorizes it after acceptance passes.
+The application is built to fail closed. A missing quote, invalid model response, stale chain, account mismatch, live endpoint, unexplained position, kill switch, time cutoff, or risk-cap breach prevents a new entry. Development entry authority is not tied to the competition clock. Competition entries become eligible automatically at the official Monday scoring start after the exact paper account is verified on that live cycle.
 
 > Educational paper-trading software only. Options involve substantial risk. Replay and counterfactual results are hypothetical and are never labeled as official competition P&L.
 
@@ -27,7 +27,7 @@ Alpaca MCP V2 ──> explicit adapter ──> deterministic candidate compiler
                                                         │
                                               idempotent limit execution
                                                         │
-                                       stale cancel/reprice + deadline closes
+                             stale repricing + profit/loss/time/portfolio exits
                                                         │
                                               SQL audit ledger + Passport
 ```
@@ -98,7 +98,7 @@ DATABASE_URL=sqlite:///./money_machine.development.db RUN_MODE=live \
 
 The replay endpoint and dashboard control are disabled whenever `RUN_MODE=live`.
 
-There is intentionally no `EXECUTION_ENABLED` flag. New-entry authority is derived from the fixed competition clock, verified account role, persistent kill switch, clean reconciliation, acceptance evidence, and the version-controlled go-live latch.
+There is intentionally no `EXECUTION_ENABLED` or separate go-live flag. New-entry authority is derived from `ACCOUNT_ROLE`, the fixed competition clock, exact paper-account verification, persistent kill switch, and clean reconciliation. Development is not bound to the competition clock, although options still require an open market to execute.
 
 ## Testing and quality
 
@@ -148,7 +148,7 @@ services and a Basic database, so review Render pricing before applying it.
 - Structures use one underlying, one expiry, equal leg ratios, and bounded long wings.
 - Multi-leg entries are day limit orders with deterministic client IDs.
 - Stale entries are canceled and can be replaced only twice within a fixed concession budget.
-- New entries stop at the immutable cutoff; short-volatility and final flatten deadlines submit close-only multi-leg orders, and close authority persists until flat.
+- Open positions use executable-quote profit targets, stop losses, the model's maximum holding time, and portfolio loss/drawdown exits. New entries stop at the immutable cutoff; short-volatility and final flatten deadlines submit close-only multi-leg orders, and close authority persists until flat.
 - Counterfactual and replay data are visually and structurally separate from official P&L.
 
 See [SECURITY.md](SECURITY.md) for incident handling and disclosure.

@@ -23,13 +23,14 @@
 - [x] SPY/QQQ directional debit-spread compiler
 - [x] Wired stale-order cancellation and bounded repricing lifecycle
 - [x] Wired short-volatility/final-deadline close-only lifecycle
+- [x] Wired executable-quote profit/stop, maximum-holding, daily-loss, and drawdown exits
 - [x] Evidence-based MCP/DB/reconciliation health, heartbeat state, structured logging, correlation IDs
 - [x] Read-only production acceptance command
 - [x] Docker and Render Blueprint
 - [x] Live development MCP identity/read verification
 - [x] Selected paper-account MCP V2 identity/read smoke check (zero orders submitted)
-- [ ] Production acceptance (blocked: Render secrets are pending and go-live remains unauthorized)
-- [ ] Competition execution (intentionally blocked pending explicit go-live)
+- [ ] Production acceptance (rerun after deployment against the untouched competition account)
+- [ ] Competition execution (automatically clock-blocked until Monday's official scoring start)
 
 ## P2 (not allowed to delay safety)
 

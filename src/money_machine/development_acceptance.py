@@ -121,6 +121,8 @@ async def run_development_round_trip(
             broker_order_id=open_result.broker_order_id,
             status="filled",
             quantity=1,
+            opened_at=open_result.submitted_at,
+            maximum_holding_minutes=0,
             structure=structure,
         )
         close_result, close_status = await _close_with_retries(

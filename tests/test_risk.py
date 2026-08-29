@@ -35,7 +35,6 @@ def context(**updates) -> RiskContext:
         "pending_underlyings": frozenset(),
         "kill_switch_active": False,
         "reconciliation_clean": True,
-        "production_acceptance_passed": True,
     }
     values.update(updates)
     return RiskContext(**values)
@@ -57,7 +56,6 @@ async def test_quantity_rounds_down_to_per_structure_cap(replay_candidate) -> No
         ({"execution_state": ExecutionState.CLOSE_ONLY}, RiskReason.NOT_FULL_EXECUTION),
         ({"kill_switch_active": True}, RiskReason.KILL_SWITCH),
         ({"reconciliation_clean": False}, RiskReason.RECONCILIATION),
-        ({"production_acceptance_passed": False}, RiskReason.ACCEPTANCE_BLOCKED),
         ({"equity": Decimal("98999")}, RiskReason.DAILY_LOSS),
         ({"equity": Decimal("97999")}, RiskReason.DRAWDOWN),
         ({"open_alpha_structures": 3}, RiskReason.OPEN_STRUCTURE_LIMIT),

@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -6,6 +6,7 @@ import pytest
 from money_machine.adapters.replay import infer_atm_implied_move
 from money_machine.domain.candidates import build_candidates
 from money_machine.domain.enums import Side
+from money_machine.domain.events import scheduled_macro_event_risk
 from money_machine.domain.options import calculate_maximum_loss, validate_defined_risk
 
 
@@ -62,3 +63,9 @@ async def test_incomplete_chain_returns_no_candidate(replay_adapter) -> None:
     report = build_candidates([snapshot], {"SPY": []}, replay_adapter.observed_at)
     assert report.candidates == ()
     assert "empty" in " ".join(report.rejections["SPY"])
+
+
+def test_competition_macro_release_blocks_crossing_hold_and_cools_down() -> None:
+    assert scheduled_macro_event_risk(datetime(2026, 9, 1, 13, 30, tzinfo=UTC))
+    assert scheduled_macro_event_risk(datetime(2026, 9, 1, 14, 15, tzinfo=UTC))
+    assert not scheduled_macro_event_risk(datetime(2026, 9, 1, 14, 31, tzinfo=UTC))

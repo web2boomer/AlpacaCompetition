@@ -1,10 +1,13 @@
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from pydantic import SecretStr, ValidationError
 
+from money_machine.domain.clock import STARTS_AT
+from money_machine.domain.enums import AccountRole
 from money_machine.domain.schemas import AccountSnapshot
-from money_machine.safety import verify_account_identity
+from money_machine.safety import new_entry_authorized, verify_account_identity
 from money_machine.settings import Settings
 
 
@@ -94,3 +97,13 @@ def test_account_mismatch_rejected() -> None:
 def test_non_paper_account_rejected() -> None:
     with pytest.raises(ValueError, match="non-paper"):
         verify_account_identity(configured_settings(), account(is_paper=False))
+
+
+def test_competition_entry_authority_is_derived_from_scoring_window() -> None:
+    assert not new_entry_authorized(AccountRole.COMPETITION, now=STARTS_AT - timedelta(seconds=1))
+    assert new_entry_authorized(AccountRole.COMPETITION, now=STARTS_AT)
+
+
+def test_development_entry_authority_is_not_bound_to_competition_clock() -> None:
+    assert new_entry_authorized(AccountRole.DEVELOPMENT, now=STARTS_AT - timedelta(days=30))
+    assert new_entry_authorized(AccountRole.DEVELOPMENT, now=STARTS_AT + timedelta(days=30))

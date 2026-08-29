@@ -178,7 +178,7 @@ async def test_final_flatten_submits_close_only_structure_and_reconciles_flat(
     assert closing.passport["execution"]["submitted"]
     assert not closing.passport["execution"]["entry_submitted"]
     assert any(
-        event["event"] == "deadline_close_submitted"
+        event["event"] == "position_close_submitted"
         for event in closing.passport["operational_state"]["lifecycle_events"]
     )
 

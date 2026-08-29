@@ -188,7 +188,6 @@ class RiskContext(StrictModel):
     pending_underlyings: frozenset[str] = frozenset()
     kill_switch_active: bool = False
     reconciliation_clean: bool = True
-    production_acceptance_passed: bool = False
 
 
 class AuctionResult(StrictModel):

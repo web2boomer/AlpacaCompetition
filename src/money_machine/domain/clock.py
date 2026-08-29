@@ -4,11 +4,14 @@ from decimal import Decimal
 
 from money_machine.domain.enums import ExecutionState
 
-STARTS_AT = datetime(2026, 8, 28, 15, 0, tzinfo=UTC)
+HACKATHON_STARTS_AT = datetime(2026, 8, 28, 13, 30, tzinfo=UTC)
+SCORING_STARTS_AT = datetime(2026, 8, 31, 13, 30, tzinfo=UTC)
+# Backwards-compatible name for the start of trading authority.
+STARTS_AT = SCORING_STARTS_AT
 NEW_ENTRY_CUTOFF = datetime(2026, 9, 3, 19, 30, tzinfo=UTC)
-SHORT_VOL_FLATTEN_BY = datetime(2026, 9, 3, 19, 45, tzinfo=UTC)
-FINAL_FLATTEN_BY = datetime(2026, 9, 4, 14, 0, tzinfo=UTC)
-ENDS_AT = datetime(2026, 9, 4, 15, 0, tzinfo=UTC)
+SHORT_VOL_FLATTEN_BY = datetime(2026, 9, 3, 19, 40, tzinfo=UTC)
+FINAL_FLATTEN_BY = datetime(2026, 9, 3, 19, 45, tzinfo=UTC)
+ENDS_AT = datetime(2026, 9, 4, 13, 30, tzinfo=UTC)
 BASELINE_EQUITY = Decimal("100000.00")
 
 

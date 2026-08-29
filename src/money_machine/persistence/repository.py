@@ -337,7 +337,7 @@ class AuditRepository:
         managed: list[ManagedStructure] = []
         with self.database.session() as session:
             rows = session.execute(
-                select(BrokerOrderORM, CandidateORM, OptionStructureORM)
+                select(BrokerOrderORM, CandidateORM, OptionStructureORM, ModelDecisionORM)
                 .join(
                     CandidateORM,
                     and_(
@@ -349,9 +349,13 @@ class AuditRepository:
                     OptionStructureORM,
                     OptionStructureORM.candidate_row_id == CandidateORM.id,
                 )
+                .join(
+                    ModelDecisionORM,
+                    ModelDecisionORM.agent_run_id == BrokerOrderORM.agent_run_id,
+                )
                 .where(BrokerOrderORM.status.in_(("filled", "closing")))
             )
-            for order, candidate, structure in rows:
+            for order, candidate, structure, decision in rows:
                 request = order.raw_json.get("request", {})
                 if isinstance(request, dict) and request.get("is_closing"):
                     continue
@@ -365,6 +369,8 @@ class AuditRepository:
                         broker_order_id=order.broker_order_id,
                         status=order.status,
                         quantity=order.quantity,
+                        opened_at=_safe_datetime(order.submitted_at),
+                        maximum_holding_minutes=decision.maximum_holding_minutes,
                         structure=OptionStructure(
                             strategy=structure.strategy,
                             underlying=structure.underlying,
@@ -427,12 +433,17 @@ class AuditRepository:
             )
             return bool(count and count > 0)
 
-    def portfolio_risk_summary(self, fallback_equity: Decimal) -> dict[str, Any]:
+    def portfolio_risk_summary(
+        self, fallback_equity: Decimal, *, now: datetime | None = None
+    ) -> dict[str, Any]:
+        observed_at = (now or datetime.now(UTC)).astimezone(UTC)
+        day_start = observed_at.replace(hour=0, minute=0, second=0, microsecond=0)
         with self.database.session() as session:
             peak = session.scalar(select(func.max(EquitySnapshotORM.equity))) or fallback_equity
             latest_today = (
                 session.scalar(
                     select(EquitySnapshotORM.equity)
+                    .where(EquitySnapshotORM.observed_at >= day_start)
                     .order_by(EquitySnapshotORM.observed_at)
                     .limit(1)
                 )

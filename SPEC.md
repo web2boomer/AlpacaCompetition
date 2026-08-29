@@ -154,19 +154,20 @@ Competition timing is immutable product policy and belongs in version-controlled
 Internal timestamps must use UTC:
 
 ```text
-STARTS_AT                2026-08-28 15:00:00Z  # 11:00 AM EDT
+HACKATHON_STARTS_AT      2026-08-28 13:30:00Z  # Friday 9:30 AM EDT (build window)
+SCORING_STARTS_AT        2026-08-31 13:30:00Z  # Monday 9:30 AM EDT (trading window)
 NEW_ENTRY_CUTOFF         2026-09-03 19:30:00Z  # 3:30 PM EDT
-SHORT_VOL_FLATTEN_BY     2026-09-03 19:45:00Z  # 3:45 PM EDT
-FINAL_FLATTEN_BY         2026-09-04 14:00:00Z  # 10:00 AM EDT
-ENDS_AT                  2026-09-04 15:00:00Z  # 11:00 AM EDT
+SHORT_VOL_FLATTEN_BY     2026-09-03 19:40:00Z  # Thursday 3:40 PM EDT
+FINAL_FLATTEN_BY         2026-09-03 19:45:00Z  # Thursday 3:45 PM EDT
+ENDS_AT                  2026-09-04 13:30:00Z  # Friday 9:30 AM EDT
 BASELINE_EQUITY          100000.00
 ```
 
 The production execution state is derived as follows:
 
 ```text
-Before STARTS_AT                 OBSERVE_ONLY
-STARTS_AT to NEW_ENTRY_CUTOFF    FULL_EXECUTION
+Before SCORING_STARTS_AT         OBSERVE_ONLY
+SCORING_STARTS_AT to cutoff      FULL_EXECUTION
 NEW_ENTRY_CUTOFF to ENDS_AT      CLOSE_ONLY
 After ENDS_AT with positions     CLOSE_ONLY_UNTIL_FLAT
 After ENDS_AT and flat           DISABLED
@@ -174,7 +175,9 @@ After ENDS_AT and flat           DISABLED
 
 Risk-reducing cancel and close operations remain available whenever exposure exists. New entries never remain available after the entry cutoff.
 
-September 4 contains the 8:30 AM EDT Employment Situation release. Index short-volatility positions must be flat before the prior close unless an explicit deterministic policy added before strategy freeze proves otherwise. No late discretionary exception is allowed.
+Official P&L is measured from Monday's open using the fresh competition account and final account equity is taken after Thursday's close. Every position is therefore scheduled flat before Thursday's closing bell; the Friday hackathon deadline is not treated as extra trading time. September 4 also contains the 8:30 AM EDT Employment Situation release, so no exposure is carried into it.
+
+For this one-off event, the reviewed BLS, BEA, and Federal Reserve release times are also version-controlled. Candidate generation abstains when its six-hour intended holding period would cross JOLTS, the September 2 labor release or Beige Book, the September 3 productivity/trade releases, or the September 4 Employment Situation, and observes a short post-release cooldown.
 
 Boundary tests are required for one second before, exactly at, and one second after every transition.
 

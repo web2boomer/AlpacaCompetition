@@ -13,13 +13,12 @@ from money_machine.domain.clock import (
     competition_clock,
 )
 from money_machine.domain.enums import (
-    AccountRole,
     AppEnvironment,
     ExecutionState,
     RiskReason,
     RunMode,
 )
-from money_machine.domain.risk import evaluate_risk
+from money_machine.domain.risk import COMPETITION_DRAWDOWN_PCT, DAILY_LOSS_PCT, evaluate_risk
 from money_machine.domain.schemas import (
     AuctionResult,
     BrokerOrderRequest,
@@ -28,7 +27,12 @@ from money_machine.domain.schemas import (
     RiskContext,
     UnderlyingSnapshot,
 )
-from money_machine.execution import close_request, replacement_request, stale_order_action
+from money_machine.execution import (
+    close_request,
+    replacement_request,
+    stale_order_action,
+    structure_exit_signal,
+)
 from money_machine.persistence.repository import AuditRepository, deterministic_client_order_id
 from money_machine.ports import AlpacaPort, ModelProvider
 from money_machine.safety import verify_account_identity
@@ -96,6 +100,8 @@ class AgentService:
                 execution_state = (
                     ExecutionState.FULL_EXECUTION if market_open else ExecutionState.OBSERVE_ONLY
                 )
+            elif execution_state is ExecutionState.FULL_EXECUTION and not market_open:
+                execution_state = ExecutionState.OBSERVE_ONLY
 
             snapshots_raw, chains_raw = await asyncio.gather(
                 asyncio.gather(*(adapter.underlying_snapshot(symbol) for symbol in UNIVERSE)),
@@ -104,15 +110,24 @@ class AgentService:
             chains = {
                 symbol: list(chain) for symbol, chain in zip(UNIVERSE, chains_raw, strict=True)
             }
+            risk_summary = self.repository.portfolio_risk_summary(account.equity, now=now)
+            peak_equity = max(account.equity, risk_summary["peak_equity"], BASELINE_EQUITY)
+            portfolio_exit_reason = _portfolio_exit_reason(
+                equity=account.equity,
+                start_of_day_equity=risk_summary["start_of_day_equity"],
+                peak_equity=peak_equity,
+            )
             lifecycle_events, lifecycle_incidents = await self._maintain_order_lifecycle(
                 adapter=adapter,
                 run_id=run_id,
                 cycle_key=cycle_key,
                 now=now,
                 clock=clock,
+                market_open=market_open,
                 allow_new_entries=execution_state is ExecutionState.FULL_EXECUTION,
                 positions=list(positions),
                 chains=chains,
+                force_close_reason=portfolio_exit_reason,
             )
             if lifecycle_incidents:
                 reconciliation_clean = False
@@ -123,8 +138,6 @@ class AgentService:
                 infer_atm_implied_move(snapshot, chains[snapshot.symbol])
                 for snapshot in snapshots_raw
             ]
-            risk_summary = self.repository.portfolio_risk_summary(account.equity)
-            peak_equity = max(account.equity, risk_summary["peak_equity"], BASELINE_EQUITY)
             self.repository.persist_observation(
                 run_id,
                 source="replay" if mode is RunMode.REPLAY else "alpaca_mcp_v2",
@@ -153,9 +166,6 @@ class AgentService:
             )
             selected = _candidate_by_id(report, envelope.decision.candidate_id)
             operational = self.repository.latest_operational_state()
-            acceptance_passed = mode is RunMode.REPLAY or (
-                self.settings.account_role is AccountRole.DEVELOPMENT and reconciliation_clean
-            )
             context = RiskContext(
                 now=now,
                 execution_state=execution_state,
@@ -168,7 +178,6 @@ class AgentService:
                 pending_underlyings=risk_summary["pending_underlyings"],
                 kill_switch_active=bool(operational.get("kill_switch_active", False)),
                 reconciliation_clean=reconciliation_clean,
-                production_acceptance_passed=acceptance_passed,
             )
             risk = evaluate_risk(envelope.decision, selected, context)
             auction = AuctionResult(
@@ -264,9 +273,11 @@ class AgentService:
         cycle_key: str,
         now: datetime,
         clock: CompetitionClockSnapshot,
+        market_open: bool,
         allow_new_entries: bool,
         positions: list[dict[str, Any]],
         chains: dict[str, list[OptionQuote]],
+        force_close_reason: str | None,
     ) -> tuple[tuple[dict[str, Any], ...], tuple[str, ...]]:
         events: list[dict[str, Any]] = []
         incidents: list[str] = []
@@ -290,7 +301,7 @@ class AgentService:
                     "status": "canceled",
                 }
             )
-            may_replace = order.is_closing or allow_new_entries
+            may_replace = market_open and (order.is_closing or allow_new_entries)
             if (
                 action.action != "cancel_and_replace"
                 or not may_replace
@@ -325,12 +336,6 @@ class AgentService:
                 }
             )
 
-        must_manage_closes = self.settings.app_env is AppEnvironment.PRODUCTION and (
-            clock.must_flatten_short_vol or clock.must_flatten_all
-        )
-        if not must_manage_closes:
-            return tuple(events), tuple(incidents)
-
         quote_map = {quote.symbol: quote for chain in chains.values() for quote in chain}
         position_quantities = {
             str(position.get("symbol")): abs(Decimal(str(position.get("qty") or 0)))
@@ -339,8 +344,6 @@ class AgentService:
         }
         for managed in self.repository.open_managed_structures():
             if managed.status == "closing":
-                continue
-            if not clock.must_flatten_all and not managed.structure.is_credit:
                 continue
             leg_symbols = [leg.symbol for leg in managed.structure.legs]
             present = [position_quantities.get(symbol, Decimal("0")) > 0 for symbol in leg_symbols]
@@ -358,6 +361,21 @@ class AgentService:
             if not all(present):
                 incidents.append("rejected_close_incomplete_structure")
                 continue
+            if not market_open:
+                continue
+            deadline_reason = None
+            if clock.must_flatten_all:
+                deadline_reason = "final_flatten_deadline"
+            elif clock.must_flatten_short_vol and managed.structure.is_credit:
+                deadline_reason = "short_vol_flatten_deadline"
+            signal = structure_exit_signal(
+                managed,
+                quotes=quote_map,
+                now=now,
+                force_close_reason=deadline_reason or force_close_reason,
+            )
+            if not signal.should_close:
+                continue
             closeable = min(
                 int(position_quantities[leg.symbol] / Decimal(leg.ratio_qty))
                 for leg in managed.structure.legs
@@ -374,19 +392,24 @@ class AgentService:
             )
             if self.repository.order_exists(client_order_id):
                 continue
-            request = close_request(
-                managed,
-                quotes=quote_map,
-                client_order_id=client_order_id,
-                quantity=quantity,
-                environment_role=self.settings.account_role.value,
-            )
+            try:
+                request = close_request(
+                    managed,
+                    quotes=quote_map,
+                    client_order_id=client_order_id,
+                    quantity=quantity,
+                    environment_role=self.settings.account_role.value,
+                )
+            except ValueError:
+                incidents.append("rejected_close_incomplete_quotes")
+                continue
             result = await adapter.place_option_order(request)
             self.repository.persist_order(run_id, request, result)
             self.repository.mark_order_status(managed.client_order_id, status="closing", now=now)
             events.append(
                 {
-                    "event": "deadline_close_submitted",
+                    "event": "position_close_submitted",
+                    "reason": signal.reason,
                     "client_order_id": request.client_order_id,
                     "broker_order_id": result.broker_order_id,
                     "status": result.status,
@@ -432,7 +455,7 @@ def _passport(
     submitted_lifecycle = [
         event
         for event in lifecycle_events
-        if event["event"] in {"order_replaced_with_bounded_concession", "deadline_close_submitted"}
+        if event["event"] in {"order_replaced_with_bounded_concession", "position_close_submitted"}
     ]
     latest_lifecycle = submitted_lifecycle[-1] if submitted_lifecycle else {}
     return {
@@ -516,3 +539,15 @@ def _snapshot_features(snapshot: UnderlyingSnapshot) -> dict[str, Any]:
     features = snapshot.model_dump(mode="json")
     features["richness_ratio"] = str(snapshot.richness_ratio)
     return features
+
+
+def _portfolio_exit_reason(
+    *, equity: Decimal, start_of_day_equity: Decimal, peak_equity: Decimal
+) -> str | None:
+    daily_loss = max(Decimal("0"), start_of_day_equity - equity)
+    if daily_loss >= start_of_day_equity * DAILY_LOSS_PCT:
+        return "daily_loss_limit"
+    drawdown = max(Decimal("0"), peak_equity - equity)
+    if drawdown >= peak_equity * COMPETITION_DRAWDOWN_PCT:
+        return "competition_drawdown_limit"
+    return None

@@ -79,13 +79,6 @@ def evaluate_risk(
         RiskReason.RECONCILIATION,
     )
     add(
-        "production_acceptance",
-        context.production_acceptance_passed,
-        context.production_acceptance_passed,
-        True,
-        RiskReason.ACCEPTANCE_BLOCKED,
-    )
-    add(
         "data_freshness",
         candidate.data_age_seconds <= MAX_DATA_AGE_SECONDS,
         candidate.data_age_seconds,

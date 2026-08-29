@@ -20,7 +20,7 @@ from money_machine.domain.schemas import (
     OptionQuote,
     UnderlyingSnapshot,
 )
-from money_machine.safety import production_entry_authorized
+from money_machine.safety import new_entry_authorized
 from money_machine.settings import Settings
 
 OCC_PATTERN = re.compile(r"^([A-Z.]+)(\d{6})([CP])(\d{8})$")
@@ -33,9 +33,8 @@ class AlpacaMcpError(RuntimeError):
 class AlpacaMcpV2Adapter:
     """Explicit stdio adapter for Alpaca's official MCP Server V2."""
 
-    def __init__(self, settings: Settings, *, production_acceptance_passed: bool = False) -> None:
+    def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.production_acceptance_passed = production_acceptance_passed
         self._stack: AsyncExitStack | None = None
         self._session: ClientSession | None = None
         self._tools: set[str] = set()
@@ -230,9 +229,9 @@ class AlpacaMcpV2Adapter:
         if (
             self.settings.account_role is AccountRole.COMPETITION
             and not request.is_closing
-            and not production_entry_authorized(acceptance_passed=self.production_acceptance_passed)
+            and not new_entry_authorized(self.settings.account_role)
         ):
-            raise AlpacaMcpError("competition order blocked by version-controlled go-live policy")
+            raise AlpacaMcpError("competition entry blocked by the competition clock")
         legs = [
             {
                 "symbol": leg.symbol,

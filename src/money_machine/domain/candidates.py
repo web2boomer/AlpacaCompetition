@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
 from money_machine.domain.enums import Action, OptionRight, PositionIntent, Side
+from money_machine.domain.events import scheduled_macro_event_risk
 from money_machine.domain.options import MULTIPLIER, calculate_maximum_loss
 from money_machine.domain.schemas import (
     Candidate,
@@ -40,6 +41,9 @@ def build_candidates(
     candidates: list[Candidate] = []
     rejections: dict[str, tuple[str, ...]] = {}
     for snapshot in snapshots:
+        snapshot = snapshot.model_copy(
+            update={"event_risk": snapshot.event_risk or scheduled_macro_event_risk(now)}
+        )
         symbol_candidates: list[Candidate] = []
         reasons: list[str] = []
         chain = chains.get(snapshot.symbol, [])
