@@ -20,6 +20,8 @@ def test_dashboard_and_health(settings, database) -> None:
     assert response.status_code == 200
     assert "Money Machine" in response.text
     assert "Recent agent activity" in response.text
+    assert "Each row is a possible defined-risk options trade" in response.text
+    assert "These are fixed safety checks, not model opinions" in response.text
     assert "Last update" in response.text
     assert "System health" in response.text
     assert "https://aob.io" in response.text

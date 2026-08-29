@@ -25,6 +25,7 @@
 .ops-metrics{margin-top:18px}
 .decision-workspace{grid-template-columns:1.15fr .85fr}
 .decision-workspace .panel{min-height:310px}
+.panel-explainer{max-width:680px;margin:9px 0 0;color:var(--muted);font-size:11px;line-height:1.55}
 .text-link{display:inline-flex;margin-top:22px;color:#294e35;font-size:11px;font-weight:750;text-decoration:none;border-bottom:1px solid rgba(41,78,53,.3);padding-bottom:3px}
 .decision-provenance{display:flex;align-items:center;justify-content:space-between;gap:16px}
 .provider-badge{border:1px solid rgba(41,78,53,.22);border-radius:100px;padding:6px 8px;color:#467e4d;font:8px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}

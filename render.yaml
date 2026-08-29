@@ -21,7 +21,7 @@ projects:
               - key: CLIENT_ORDER_PREFIX
                 value: mm-comp
               - key: MODEL_PROVIDER
-                value: deterministic
+                value: openai
               - key: MCP_COMMAND
                 value: alpaca-mcp-server
               # Secret values are managed in the Render dashboard. Omitting them

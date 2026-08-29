@@ -79,7 +79,11 @@
 <section class="shell two-col section-gap decision-workspace">
   <article class="panel auction-panel">
     <div class="panel-head">
-      <div><span class="kicker">Risk auction</span><h2>Candidate evaluation</h2></div>
+      <div>
+        <span class="kicker">Risk auction</span>
+        <h2>Candidate evaluation</h2>
+        <p class="panel-explainer">Each row is a possible defined-risk options trade. The system compares payoff, maximum loss, liquidity, and data quality; “Cash won” means every candidate was rejected.</p>
+      </div>
       <span class="decision-pill {{ 'approved' if risk.get('approved') else 'rejected' }}">{{ 'Approved' if risk.get('approved') else 'Cash won' }}</span>
     </div>
     <div class="auction-list">
@@ -113,7 +117,7 @@
 </section>
 
 <section class="shell panel section-gap guardrail-panel">
-  <div class="panel-head"><div><span class="kicker">Deterministic policy</span><h2>Hard gates</h2></div><span class="mono">{{ risk.get('checks', [])|length }} checks</span></div>
+  <div class="panel-head"><div><span class="kicker">Deterministic policy</span><h2>Hard gates</h2><p class="panel-explainer">These are fixed safety checks, not model opinions. Every check must pass before an order can be sent; one failure keeps the account in cash.</p></div><span class="mono">{{ risk.get('checks', [])|length }} checks</span></div>
   <div class="checks-grid">
     {% for check in risk.get('checks', []) %}
     <div class="check {{ 'pass' if check.passed else 'fail' }}"><span>{{ '✓' if check.passed else '×' }}</span><div><strong>{{ check.name|replace('_', ' ') }}</strong><small>{{ check.actual }} / {{ check.limit }}</small></div></div>
