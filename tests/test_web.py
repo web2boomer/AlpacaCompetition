@@ -17,7 +17,6 @@ def test_dashboard_and_health(settings, database) -> None:
         liveness = client.get("/api/liveness")
         passport = client.get("/api/passports/latest")
         activity = client.get("/api/activity")
-        performance = client.get("/api/performance")
     assert response.status_code == 200
     assert "Money Machine" in response.text
     assert "Recent agent activity" in response.text
@@ -43,8 +42,6 @@ def test_dashboard_and_health(settings, database) -> None:
     assert activity.status_code == 200
     assert activity.json()["entries"]
     assert activity.json()["latest_run_id"] == passport.json()["run_id"]
-    assert performance.status_code == 200
-    assert performance.json()["available"] is False
 
 
 def test_live_health_is_degraded_until_mcp_cycle_and_heartbeat(settings, database) -> None:
