@@ -1,9 +1,15 @@
 # Mission Control business reporting
 
 The scheduler worker pushes one consolidated Business Performance Protocol v1 report for
-`alpaca-competition` every 60 minutes. Reports are built entirely from completed, official rows in
-the local `equity_snapshots` audit table. Reporting never calls Alpaca and never exposes Alpaca or
-database credentials to Mission Control.
+`alpaca-competition` every 60 minutes. Reports are built entirely from completed rows in the local
+`equity_snapshots` audit table for the verified production competition account. Reporting never
+calls Alpaca and never exposes Alpaca or database credentials to Mission Control.
+
+Before scoring begins, the worker sends an `estimated` pre-competition telemetry report so Mission
+Control can verify the reporting uplink and display current paper equity/P&L. Its metadata includes
+`official_scoring_window: false` and `scoring_window_state: pre_scoring`; the P&L label is
+`Pre-competition paper P&L`. This reporting does not grant trading authority and does not classify
+weekend observations as official competition performance.
 
 ## Paper P&L exception
 
@@ -23,11 +29,14 @@ ledger, tax, or cash accounting purpose.
 | `cash_balance` | `equity_snapshots.cash` from the same row | Balance | Point-in-time at the report boundary; USD | Alpaca's persisted paper cash balance is authoritative. |
 | `return_percent` | `(equity - 100000) / 100000 * 100` | Gauge | Competition-to-date; percent | The fixed verified competition baseline is `$100,000.00`; output is rounded to four decimal places. |
 
-Reports start at the official scoring boundary (`2026-08-31T13:30:00Z`). Each open-period report is
-`estimated` and uses a stable ID tied to its hourly boundary. After Thursday's EOD measurement, a
-`final` report is produced only from the exact authoritative Thursday EOD equity checkpoint at
-`2026-09-03T20:00:00Z`; if that snapshot does not exist, final is deliberately omitted. Production
-paper observations before Monday and post-EOD observations are excluded from official reports.
+Pre-scoring reports start after the first completed hourly boundary following the hackathon start
+and use only persisted, completed live observations for the verified competition account. Official
+competition reports begin after the first completed scoring interval following
+`2026-08-31T13:30:00Z`. Every report is `estimated` and has a stable ID tied to its hourly boundary.
+After Thursday's EOD measurement, a `final` report is produced only from the exact authoritative
+Thursday EOD equity checkpoint at `2026-09-03T20:00:00Z`; if that snapshot does not exist, final is
+deliberately omitted. Production paper observations before Monday remain excluded from official
+competition reports even though they are visible as explicitly non-official telemetry.
 
 The adapter omits broker-reported `realized_pl` and `unrealized_pl` as separate metrics because
 those fields are not guaranteed to be populated by the Alpaca account response. It does not send a

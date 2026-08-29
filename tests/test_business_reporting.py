@@ -14,6 +14,7 @@ from money_machine.business_reporting import (
 from money_machine.domain.clock import (
     BASELINE_EQUITY,
     EOD_EQUITY_SNAPSHOT_AT,
+    HACKATHON_STARTS_AT,
     SCORING_STARTS_AT,
 )
 from money_machine.persistence.models import AgentRunORM, EquitySnapshotORM
@@ -30,6 +31,7 @@ def persist_equity(
     official: bool = True,
     status: str = "completed",
     fingerprint: str | None = None,
+    mode: str | None = None,
 ) -> None:
     run_id = f"run-{observed_at.timestamp()}-{official}"
     with repository.database.session() as session:
@@ -38,7 +40,7 @@ def persist_equity(
                 id=run_id,
                 cycle_key=f"cycle-{run_id}",
                 correlation_id=f"correlation-{run_id}",
-                mode="live" if official else "replay",
+                mode=mode or ("live" if official else "replay"),
                 status=status,
                 started_at=observed_at,
                 completed_at=observed_at,
@@ -84,6 +86,100 @@ def test_builder_maps_persisted_paper_equity_to_real_competition_pnl(
     assert report.metadata is not None
     assert report.metadata["paper_pnl_reported_as_real"] is True
     assert report.metadata["paper_pnl_exception_note"] == PAPER_PNL_EXCEPTION_NOTE
+    assert report.metadata["official_scoring_window"] is True
+
+
+def test_builder_reports_verified_pre_scoring_equity_without_calling_it_official(
+    repository: AuditRepository,
+) -> None:
+    boundary = HACKATHON_STARTS_AT + timedelta(hours=2)
+    fingerprint = "verified-account"
+    persist_equity(
+        repository,
+        observed_at=boundary,
+        equity=Decimal("100125.50"),
+        official=False,
+        fingerprint=fingerprint,
+        mode="live",
+    )
+
+    report = BusinessReportBuilder(repository, account_fingerprint=fingerprint).build(
+        now=boundary + timedelta(minutes=17)
+    )
+
+    assert report is not None
+    assert report.period_start == HACKATHON_STARTS_AT
+    assert report.period_end == boundary
+    assert report.report_status == "estimated"
+    metrics = {metric.name: metric for metric in report.metrics}
+    assert metrics["net_profit"].value == Decimal("125.50")
+    assert metrics["net_profit"].label == "Pre-competition paper P&L"
+    assert report.metadata is not None
+    assert report.metadata["official_scoring_window"] is False
+    assert report.metadata["scoring_window_state"] == "pre_scoring"
+
+
+def test_pre_scoring_report_requires_completed_live_verified_account_snapshot(
+    repository: AuditRepository,
+) -> None:
+    boundary = HACKATHON_STARTS_AT + timedelta(hours=1)
+    fingerprint = "verified-account"
+    persist_equity(
+        repository,
+        observed_at=boundary - timedelta(minutes=1),
+        equity=Decimal("101000"),
+        official=False,
+        fingerprint="wrong-account",
+        mode="live",
+    )
+    persist_equity(
+        repository,
+        observed_at=boundary,
+        equity=Decimal("102000"),
+        official=False,
+        fingerprint=fingerprint,
+        status="failed",
+        mode="live",
+    )
+
+    assert (
+        BusinessReportBuilder(repository, account_fingerprint=fingerprint).build(
+            now=boundary + timedelta(minutes=1)
+        )
+        is None
+    )
+
+
+def test_scoring_transition_reports_last_pre_scoring_checkpoint_as_non_official(
+    repository: AuditRepository,
+) -> None:
+    fingerprint = "verified-account"
+    persist_equity(
+        repository,
+        observed_at=SCORING_STARTS_AT - timedelta(minutes=5),
+        equity=Decimal("100010"),
+        official=False,
+        fingerprint=fingerprint,
+        mode="live",
+    )
+    persist_equity(
+        repository,
+        observed_at=SCORING_STARTS_AT,
+        equity=Decimal("100020"),
+        fingerprint=fingerprint,
+    )
+
+    report = BusinessReportBuilder(repository, account_fingerprint=fingerprint).build(
+        now=SCORING_STARTS_AT + timedelta(minutes=5)
+    )
+
+    assert report is not None
+    assert report.period_end == SCORING_STARTS_AT
+    assert {metric.name: metric.value for metric in report.metrics}["net_profit"] == Decimal(
+        "10.00"
+    )
+    assert report.metadata is not None
+    assert report.metadata["official_scoring_window"] is False
 
 
 def test_report_id_is_stable_within_the_reporting_interval(

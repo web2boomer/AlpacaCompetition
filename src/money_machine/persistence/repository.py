@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from money_machine.domain.clock import (
     BASELINE_EQUITY,
     EOD_EQUITY_SNAPSHOT_AT,
+    HACKATHON_STARTS_AT,
     SCORING_STARTS_AT,
     scoring_window_state,
 )
@@ -554,6 +555,33 @@ class AuditRepository:
                     EquitySnapshotORM.official,
                     EquitySnapshotORM.observed_at >= SCORING_STARTS_AT,
                     EquitySnapshotORM.observed_at <= EOD_EQUITY_SNAPSHOT_AT,
+                    EquitySnapshotORM.observed_at <= observed_at,
+                )
+                .order_by(desc(EquitySnapshotORM.observed_at), desc(EquitySnapshotORM.id))
+                .limit(1)
+            )
+            if account_fingerprint:
+                query = query.where(
+                    AgentRunORM.passport_json["account"]["fingerprint"].as_string()
+                    == account_fingerprint
+                )
+            row = session.scalar(query)
+            return _persisted_equity(row)
+
+    def latest_pre_scoring_equity_at_or_before(
+        self, observed_at: datetime, *, account_fingerprint: str | None = None
+    ) -> PersistedEquitySnapshot | None:
+        """Return persisted live-account telemetry without classifying it as official P&L."""
+        with self.database.session() as session:
+            query = (
+                select(EquitySnapshotORM)
+                .join(AgentRunORM, AgentRunORM.id == EquitySnapshotORM.agent_run_id)
+                .where(
+                    AgentRunORM.mode == RunMode.LIVE.value,
+                    AgentRunORM.status == "completed",
+                    EquitySnapshotORM.official.is_(False),
+                    EquitySnapshotORM.observed_at >= HACKATHON_STARTS_AT,
+                    EquitySnapshotORM.observed_at < SCORING_STARTS_AT,
                     EquitySnapshotORM.observed_at <= observed_at,
                 )
                 .order_by(desc(EquitySnapshotORM.observed_at), desc(EquitySnapshotORM.id))

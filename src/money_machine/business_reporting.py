@@ -12,6 +12,7 @@ import structlog
 from money_machine.domain.clock import (
     BASELINE_EQUITY,
     EOD_EQUITY_SNAPSHOT_AT,
+    HACKATHON_STARTS_AT,
     SCORING_STARTS_AT,
 )
 from money_machine.mission_control_business import Client, Metric, Report, SubmissionResult
@@ -60,12 +61,14 @@ class BusinessReportBuilder:
             period_end = EOD_EQUITY_SNAPSHOT_AT
             status = "final"
             id_time = EOD_EQUITY_SNAPSHOT_AT
-        else:
-            completed_intervals = int((report_time - SCORING_STARTS_AT) // self.interval)
+            period_start = SCORING_STARTS_AT
+            official_scoring_window = True
+        elif report_time < SCORING_STARTS_AT:
+            completed_intervals = int((report_time - HACKATHON_STARTS_AT) // self.interval)
             if completed_intervals < 1:
                 return None
-            period_end = SCORING_STARTS_AT + completed_intervals * self.interval
-            snapshot = self.repository.latest_official_equity_at_or_before(
+            period_end = HACKATHON_STARTS_AT + completed_intervals * self.interval
+            snapshot = self.repository.latest_pre_scoring_equity_at_or_before(
                 period_end,
                 account_fingerprint=self.account_fingerprint,
             )
@@ -73,22 +76,52 @@ class BusinessReportBuilder:
                 return None
             status = "estimated"
             id_time = period_end
+            period_start = HACKATHON_STARTS_AT
+            official_scoring_window = False
+        else:
+            completed_intervals = int((report_time - SCORING_STARTS_AT) // self.interval)
+            if completed_intervals < 1:
+                # Keep Mission Control current across the scoring transition without
+                # relabelling weekend telemetry as official competition performance.
+                period_end = SCORING_STARTS_AT
+                snapshot = self.repository.latest_pre_scoring_equity_at_or_before(
+                    period_end,
+                    account_fingerprint=self.account_fingerprint,
+                )
+                official_scoring_window = False
+                period_start = HACKATHON_STARTS_AT
+            else:
+                period_end = SCORING_STARTS_AT + completed_intervals * self.interval
+                snapshot = self.repository.latest_official_equity_at_or_before(
+                    period_end,
+                    account_fingerprint=self.account_fingerprint,
+                )
+                official_scoring_window = True
+                period_start = SCORING_STARTS_AT
+            if snapshot is None:
+                return None
+            status = "estimated"
+            id_time = period_end
         return self._report(
             snapshot=snapshot,
+            period_start=period_start,
             period_end=period_end,
             id_time=id_time,
             status=status,
             environment=environment,
+            official_scoring_window=official_scoring_window,
         )
 
     @staticmethod
     def _report(
         *,
         snapshot: PersistedEquitySnapshot,
+        period_start: datetime,
         period_end: datetime,
         id_time: datetime,
         status: str,
         environment: str,
+        official_scoring_window: bool,
     ) -> Report:
         net_profit = snapshot.equity - BASELINE_EQUITY
         return_percent = (net_profit / BASELINE_EQUITY * Decimal("100")).quantize(Decimal("0.0001"))
@@ -96,13 +129,19 @@ class BusinessReportBuilder:
         return Report(
             event_id=f"{PROJECT}-business-{suffix}-{status}",
             project=PROJECT,
-            period_start=SCORING_STARTS_AT,
+            period_start=period_start,
             period_end=period_end,
             report_status="final" if status == "final" else "estimated",
             environment=environment,
             currency="USD",
             metrics=(
-                Metric("net_profit", net_profit, "currency", "flow", "Competition P&L"),
+                Metric(
+                    "net_profit",
+                    net_profit,
+                    "currency",
+                    "flow",
+                    ("Competition P&L" if official_scoring_window else "Pre-competition paper P&L"),
+                ),
                 Metric(
                     "portfolio_value",
                     snapshot.portfolio_value,
@@ -126,6 +165,8 @@ class BusinessReportBuilder:
                 "pnl_baseline_usd": str(BASELINE_EQUITY),
                 "paper_pnl_reported_as_real": True,
                 "paper_pnl_exception_note": PAPER_PNL_EXCEPTION_NOTE,
+                "official_scoring_window": official_scoring_window,
+                "scoring_window_state": ("scoring" if official_scoring_window else "pre_scoring"),
             },
         )
 
