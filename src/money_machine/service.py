@@ -13,6 +13,7 @@ from money_machine.domain.clock import (
     competition_clock,
 )
 from money_machine.domain.enums import (
+    AccountRole,
     AppEnvironment,
     ExecutionState,
     RiskReason,
@@ -35,7 +36,7 @@ from money_machine.execution import (
 )
 from money_machine.persistence.repository import AuditRepository, deterministic_client_order_id
 from money_machine.ports import AlpacaPort, ModelProvider
-from money_machine.safety import verify_account_identity
+from money_machine.safety import verify_account_identity, verify_competition_baseline
 from money_machine.settings import Settings
 
 UNIVERSE = ("SPY", "QQQ", "IWM")
@@ -86,6 +87,17 @@ class AgentService:
             official = mode is RunMode.LIVE and self.settings.app_env is AppEnvironment.PRODUCTION
             if mode is RunMode.LIVE:
                 fingerprint = verify_account_identity(self.settings, account).account_fingerprint
+            if (
+                official
+                and self.settings.account_role is AccountRole.COMPETITION
+                and not self.repository.has_managed_orders(AccountRole.COMPETITION.value)
+            ):
+                all_orders = await adapter.orders(status="all")
+                verify_competition_baseline(
+                    account,
+                    positions=len(positions),
+                    orders=len(all_orders) + len(activities),
+                )
             self.repository.persist_fills(list(activities))
             reconciliation_clean, reconciliation_incidents = self.repository.reconcile_broker_state(
                 list(orders),

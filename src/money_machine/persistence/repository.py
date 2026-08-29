@@ -216,6 +216,15 @@ class AuditRepository:
             )
             return bool(count and count > 0)
 
+    def has_managed_orders(self, environment_role: str) -> bool:
+        with self.database.session() as session:
+            count = session.scalar(
+                select(func.count())
+                .select_from(BrokerOrderORM)
+                .where(BrokerOrderORM.environment_role == environment_role)
+            )
+            return bool(count and count > 0)
+
     def persist_order(
         self,
         run_id: str,

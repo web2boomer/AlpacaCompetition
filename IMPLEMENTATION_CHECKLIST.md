@@ -29,7 +29,7 @@
 - [x] Docker and Render Blueprint
 - [x] Live development MCP identity/read verification
 - [x] Selected paper-account MCP V2 identity/read smoke check (zero orders submitted)
-- [ ] Production acceptance (rerun after deployment against the untouched competition account)
+- [x] Production acceptance against the untouched competition account
 - [ ] Competition execution (automatically clock-blocked until Monday's official scoring start)
 
 ## P2 (not allowed to delay safety)

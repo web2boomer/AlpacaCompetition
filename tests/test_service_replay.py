@@ -155,6 +155,12 @@ async def test_final_flatten_submits_close_only_structure_and_reconciles_flat(
         {"asset_id": leg["symbol"], "symbol": leg["symbol"], "qty": "1"}
         for leg in selected["structure"]["legs"]
     ]
+    with repository.database.session() as session:
+        managed_order = session.scalar(
+            select(BrokerOrderORM).where(BrokerOrderORM.agent_run_id == first.run_id)
+        )
+        assert managed_order is not None
+        managed_order.environment_role = "competition"
     production = Settings(
         app_env="production",
         account_role="competition",
@@ -191,3 +197,29 @@ async def test_final_flatten_submits_close_only_structure_and_reconciles_flat(
     )
     summary = repository.portfolio_risk_summary(Decimal("100000"))
     assert summary["open_alpha_structures"] == 0
+
+
+@pytest.mark.asyncio
+async def test_first_competition_cycle_rejects_a_polluted_baseline(
+    settings, repository, replay_adapter
+) -> None:
+    replay_adapter.data["account"]["equity"] = "99999"
+    production = Settings(
+        app_env="production",
+        account_role="competition",
+        run_mode="live",
+        database_url=settings.database_url,
+        alpaca_api_key=SecretStr("present"),
+        alpaca_secret_key=SecretStr("present"),
+        alpaca_expected_account_id=SecretStr("REPLAY-PAPER-ACCOUNT"),
+        client_order_prefix="mm-comp",
+    )
+    outcome = await AgentService(production, repository).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=FINAL_FLATTEN_BY,
+        mode=RunMode.LIVE,
+    )
+    assert not outcome.approved
+    assert not outcome.order_submitted
+    assert outcome.passport["status"] == "failed_closed"

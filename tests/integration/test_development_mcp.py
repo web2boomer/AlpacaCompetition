@@ -10,9 +10,12 @@ from money_machine.settings import Settings, load_local_environment
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_development_mcp_authentication_and_reads() -> None:
-    env_file = Path(".env.competition.local")
+    env_file = Path(".env.development.local")
+    legacy_env_file = Path(".env.competition.local")
+    if not env_file.exists() and legacy_env_file.exists():
+        env_file = legacy_env_file
     if not env_file.exists():
-        pytest.skip(".env.competition.local is missing")
+        pytest.skip(".env.development.local is missing")
     load_local_environment(env_file)
     settings = Settings()
     if settings.account_role.value != "development":

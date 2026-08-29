@@ -2,7 +2,7 @@
 
 Money Machine is an auditable autonomous options agent for the Alpaca AI Trading Agents Hackathon, Options Alpha Agents track. It observes a paper account and liquid index options through Alpaca MCP Server V2, compiles only defined-risk structures, lets a structured model choose among candidate IDs or abstain, applies deterministic risk policy, reconciles broker state, and publishes a Decision Passport.
 
-The application is built to fail closed. A missing quote, invalid model response, stale chain, account mismatch, live endpoint, unexplained position, kill switch, time cutoff, or risk-cap breach prevents a new entry. Development entry authority is not tied to the competition clock. Competition entries become eligible automatically at the official Monday scoring start after the exact paper account is verified on that live cycle.
+The application is built to fail closed. A missing quote, invalid model response, stale chain, account mismatch, live endpoint, unexplained position, kill switch, time cutoff, or risk-cap breach prevents a new entry. Development entry authority is not tied to the competition clock. Competition entries become eligible automatically at the official Monday scoring start after the exact paper account is verified on that live cycle; before the first managed competition order, the account must also still be flat, fill-free, and exactly $100,000.
 
 > Educational paper-trading software only. Options involve substantial risk. Replay and counterfactual results are hypothetical and are never labeled as official competition P&L.
 
@@ -50,13 +50,14 @@ make serve
 
 Open <http://127.0.0.1:8000>. Replay mode requires no API keys and seeds the canonical, explicitly non-official demonstration cycle.
 
-For this local development paper account, keep the role mapping inside the file set to
-`development` even though the owner-selected filename is `.env.competition.local`. Fill the
-three Alpaca credential/identity fields and restrict the file:
+Keep the two account configurations in separate ignored files. Use
+`.env.development.local` with the development role and development credentials; reserve
+`.env.competition.local` for the production role and the fresh competition credentials.
+Fill the three Alpaca credential/identity fields and restrict both files:
 
 ```bash
-chmod 600 .env.competition.local
-.venv/bin/money-machine --env-file .env.competition.local mcp-read-check
+chmod 600 .env.development.local .env.competition.local
+.venv/bin/money-machine --env-file .env.development.local mcp-read-check
 ```
 
 Commands report credentials only as present or missing. They never print account IDs or secret values. `.env*.local` files are ignored by Git and Docker.
@@ -77,7 +78,7 @@ Commands report credentials only as present or missing. They never print account
 .venv/bin/money-machine --env-file .env.competition.local mcp-read-check
 
 # Explicitly authorized development-only order acceptance: opens and closes one bounded spread
-.venv/bin/money-machine --env-file .env.competition.local development-round-trip --confirm-paper-order
+.venv/bin/money-machine --env-file .env.development.local development-round-trip --confirm-paper-order
 
 # Read-only competition acceptance report (requires production/competition values)
 .venv/bin/money-machine --env-file .env.competition.local acceptance
@@ -91,9 +92,9 @@ Commands report credentials only as present or missing. They never print account
 
 # Run the real local development instance (dashboard and scheduler use one live audit DB)
 DATABASE_URL=sqlite:///./money_machine.development.db RUN_MODE=live \
-  .venv/bin/money-machine --env-file .env.competition.local serve --host 127.0.0.1 --port 8000
+  .venv/bin/money-machine --env-file .env.development.local serve --host 127.0.0.1 --port 8000
 DATABASE_URL=sqlite:///./money_machine.development.db RUN_MODE=live \
-  .venv/bin/money-machine --env-file .env.competition.local scheduler
+  .venv/bin/money-machine --env-file .env.development.local scheduler
 ```
 
 The replay endpoint and dashboard control are disabled whenever `RUN_MODE=live`.
@@ -109,7 +110,7 @@ There is intentionally no `EXECUTION_ENABLED` or separate go-live flag. New-entr
 .venv/bin/mypy
 ```
 
-Development MCP integration tests skip automatically when `.env.competition.local` is absent:
+Development MCP integration tests skip automatically when `.env.development.local` is absent:
 
 ```bash
 .venv/bin/pytest -m integration
