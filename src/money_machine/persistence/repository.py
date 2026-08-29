@@ -737,18 +737,13 @@ class AuditRepository:
             )
             if fingerprint:
                 equity_query = equity_query.where(
-                    AgentRunORM.passport_json["account"]["fingerprint"].as_string()
-                    == fingerprint
+                    AgentRunORM.passport_json["account"]["fingerprint"].as_string() == fingerprint
                 )
             latest_equity = session.scalar(
-                equity_query.order_by(desc(AgentRunORM.started_at))
-                .limit(1)
+                equity_query.order_by(desc(AgentRunORM.started_at)).limit(1)
             )
             equities = list(
-                session.scalars(
-                    equity_query.order_by(desc(AgentRunORM.started_at))
-                    .limit(120)
-                )
+                session.scalars(equity_query.order_by(desc(AgentRunORM.started_at)).limit(120))
             )
             equities.reverse()
             state = session.scalar(
