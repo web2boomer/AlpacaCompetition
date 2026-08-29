@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://render.com/schema/render.yaml.json
 projects:
-  - name: money-machine
+  - name: Alpaca Competition
     environments:
       - name: production
         envVarGroups:
@@ -24,14 +24,8 @@ projects:
                 value: deterministic
               - key: MCP_COMMAND
                 value: alpaca-mcp-server
-              - key: ALPACA_API_KEY
-                value: ""
-              - key: ALPACA_SECRET_KEY
-                value: ""
-              - key: ALPACA_EXPECTED_ACCOUNT_ID
-                value: ""
-              - key: OPENAI_API_KEY
-                value: ""
+              # Secret values are managed in the Render dashboard. Omitting them
+              # here preserves dashboard values across Blueprint syncs.
               - key: OPENAI_MODEL
                 value: gpt-5.6
         services:
