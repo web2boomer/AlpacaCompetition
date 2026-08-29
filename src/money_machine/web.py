@@ -59,7 +59,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     async def dashboard(request: Request) -> HTMLResponse:
         summary = repository.dashboard_summary()
         passport = summary.get("latest_passport") or {}
-        chart = _equity_chart(passport)
+        chart = _equity_chart(summary.get("equities", []))
         return templates.TemplateResponse(
             request,
             "dashboard.html",
@@ -67,6 +67,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
                 "summary": summary,
                 "passport": passport,
                 "chart": chart,
+                "activity": repository.recent_activity(),
                 "replay_enabled": app_settings.run_mode is RunMode.REPLAY,
                 "refreshed_at": datetime.now(UTC).isoformat(),
             },
@@ -98,6 +99,17 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         if passport is None:
             raise HTTPException(status_code=404, detail="No Decision Passport available")
         return JSONResponse(passport)
+
+    @app.get("/api/activity")
+    async def recent_activity() -> JSONResponse:
+        activity = repository.recent_activity()
+        return JSONResponse(
+            {
+                "generated_at": datetime.now(UTC).isoformat(),
+                "latest_run_id": activity[0]["run_id"] if activity else None,
+                "entries": activity,
+            }
+        )
 
     @app.get("/api/health")
     async def health() -> JSONResponse:
@@ -143,16 +155,23 @@ def _pct(value: Any) -> str:
         return "0.00%"
 
 
-def _equity_chart(passport: dict[str, Any]) -> str:
-    equity = float(passport.get("account", {}).get("equity", 100000))
-    values = [100000.0, 100120.0, 100260.0, equity]
+def _equity_chart(equities: list[Any]) -> str:
+    values = [float(snapshot.equity) for snapshot in equities]
+    if not values:
+        values = [100000.0]
+    if len(values) == 1:
+        values.insert(0, 100000.0)
     width, height, padding = 720, 180, 12
     low, high = min(values), max(values)
-    span = max(high - low, 1)
+    span = high - low
     points = []
     for index, value in enumerate(values):
         x = padding + index * ((width - 2 * padding) / (len(values) - 1))
-        y = height - padding - ((value - low) / span) * (height - 2 * padding)
+        y = (
+            height / 2
+            if span == 0
+            else height - padding - ((value - low) / span) * (height - 2 * padding)
+        )
         points.append(f"{x:.1f},{y:.1f}")
     return " ".join(points)
 

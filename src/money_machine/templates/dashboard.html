@@ -1,55 +1,73 @@
 {% extends "base.html" %}
-{% block title %}Money Machine · Risk Budget Auction{% endblock %}
+{% block title %}Money Machine · Live Competition Console{% endblock %}
 {% block content %}
 {% set account = passport.get('account', {}) %}
 {% set state = passport.get('operational_state', {}) %}
 {% set decision = passport.get('decision', {}) %}
 {% set risk = passport.get('risk', {}) %}
 {% set execution = passport.get('execution', {}) %}
-<section class="hero shell">
-  <div class="eyebrow-row">
-    <span class="eyebrow">The volatility governor</span>
-    <span class="mode-badge">{{ passport.get('result_label', 'NO DATA') }}</span>
+<section class="ops-header shell">
+  <div>
+    <span class="eyebrow">Live competition operations</span>
+    <h1>Money Machine</h1>
+    <p>Paper-account state, decisions, risk gates, and execution activity.</p>
   </div>
-  <div class="hero-grid">
-    <div>
-      <h1>Every trade <em>earns</em> its risk.</h1>
-      <p class="lede">Defined-risk options compete for a fixed budget. Policy can always choose cash.</p>
-      <div class="hero-actions">
-        {% if passport.get('run_id') %}<a class="button primary" href="/runs/{{ passport.run_id }}">Open latest Decision Passport <span>↗</span></a>{% endif %}
-        {% if replay_enabled %}<form action="/replay" method="post"><button class="button secondary" type="submit">Replay canonical cycle</button></form>{% endif %}
-        <span class="mono">Last refreshed <time id="last-refreshed" datetime="{{ refreshed_at }}">{{ refreshed_at }}</time></span>
-      </div>
-    </div>
-    <div class="equity-panel">
-      <div class="metric-label">Paper account equity</div>
-      <div class="equity-value">{{ account.get('equity', 0)|money }}</div>
-      <div class="equity-delta">+{{ account.get('pnl', 0)|money }} <span>from $100,000 baseline</span></div>
-      <svg class="equity-chart" viewBox="0 0 720 180" role="img" aria-label="Paper-account equity curve">
-        <defs><linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b8ff60" stop-opacity=".32"/><stop offset="1" stop-color="#b8ff60" stop-opacity="0"/></linearGradient></defs>
-        <path d="M 12 168 L {{ chart }} L 708 168 Z" fill="url(#area)"/>
-        <polyline points="{{ chart }}" fill="none" stroke="#b8ff60" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      <div class="chart-axis"><span>Competition start</span><span>Latest cycle</span></div>
-    </div>
+  <div class="refresh-card" aria-live="polite">
+    <span class="live-indicator"><i></i><strong id="connection-state">Live</strong></span>
+    <span>Updates every 15 seconds</span>
+    <span>Last update <time id="last-updated" datetime="{{ refreshed_at }}">{{ refreshed_at }}</time></span>
   </div>
 </section>
 
-<section class="shell metric-grid" aria-label="Current agent metrics">
+<section class="shell ops-grid" data-latest-run-id="{{ passport.get('run_id', '') }}">
+  <article class="panel activity-panel">
+    <div class="panel-head activity-head">
+      <div><span class="kicker">Activity tail</span><h2>Recent agent activity</h2></div>
+      <span class="mode-badge">Audit log</span>
+    </div>
+    <div class="activity-feed" id="activity-feed" aria-live="polite" aria-label="Recent agent activity">
+      {% for entry in activity %}
+      <a class="activity-entry {{ entry.tone }}" href="{{ entry.href }}">
+        <time datetime="{{ entry.timestamp }}">{{ entry.display_time }}</time>
+        <span class="activity-copy"><strong>{{ entry.label }}</strong><small>{{ entry.detail }}</small></span>
+        <span class="activity-status">{{ entry.status }}</span>
+      </a>
+      {% else %}
+      <div class="empty">Waiting for the first audited cycle.</div>
+      {% endfor %}
+    </div>
+  </article>
+
+  <article class="equity-panel ops-chart-panel">
+    <div class="panel-head">
+      <div><div class="metric-label">Paper account equity</div><div class="equity-value">{{ account.get('equity', 0)|money }}</div></div>
+      <span class="mode-badge">{{ passport.get('result_label', 'NO DATA') }}</span>
+    </div>
+    <div class="equity-delta">{{ '+' if account.get('pnl', 0)|float >= 0 else '' }}{{ account.get('pnl', 0)|money }} <span>from $100,000 baseline</span></div>
+    <svg class="equity-chart ops-equity-chart" viewBox="0 0 720 180" role="img" aria-label="Paper-account equity curve">
+      <defs><linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b8ff60" stop-opacity=".32"/><stop offset="1" stop-color="#b8ff60" stop-opacity="0"/></linearGradient></defs>
+      <path d="M 12 168 L {{ chart }} L 708 168 Z" fill="url(#area)"/>
+      <polyline points="{{ chart }}" fill="none" stroke="#b8ff60" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div class="chart-axis"><span>Competition baseline</span><span>Latest audited cycle</span></div>
+  </article>
+</section>
+
+<section class="shell metric-grid ops-metrics" aria-label="Current agent metrics">
   <article class="metric-card">
     <div class="metric-label">Execution state</div>
     <div class="metric-primary state"><i></i>{{ state.get('execution_state', 'observe_only')|replace('_', ' ') }}</div>
     <p>{{ 'Reconciliation clean' if state.get('reconciliation_clean', True) else 'Entries halted by reconciliation' }}</p>
   </article>
   <article class="metric-card">
-    <div class="metric-label">Current decision</div>
+    <div class="metric-label">Latest decision</div>
     <div class="metric-primary">{{ decision.get('action', 'abstain')|replace('_', ' ') }}</div>
     <p>{{ (decision.get('confidence', 0) * 100)|round|int }}% constrained-model confidence</p>
   </article>
   <article class="metric-card">
     <div class="metric-label">Awarded max risk</div>
     <div class="metric-primary">{{ risk.get('awarded_risk', 0)|money }}</div>
-    <p>{{ risk.get('quantity', 0) }} contract{{ '' if risk.get('quantity', 0) == 1 else 's' }} · always rounded down</p>
+    <p>{{ risk.get('quantity', 0) }} contract{{ '' if risk.get('quantity', 0) == 1 else 's' }} · rounded down</p>
   </article>
   <article class="metric-card">
     <div class="metric-label">Order state</div>
@@ -58,10 +76,10 @@
   </article>
 </section>
 
-<section class="shell two-col section-gap">
+<section class="shell two-col section-gap decision-workspace">
   <article class="panel auction-panel">
     <div class="panel-head">
-      <div><span class="kicker">01 · Risk auction</span><h2>One structure—or cash.</h2></div>
+      <div><span class="kicker">Risk auction</span><h2>Candidate evaluation</h2></div>
       <span class="decision-pill {{ 'approved' if risk.get('approved') else 'rejected' }}">{{ 'Approved' if risk.get('approved') else 'Cash won' }}</span>
     </div>
     <div class="auction-list">
@@ -69,57 +87,111 @@
       {% set selected = candidate.candidate_id == decision.get('candidate_id') %}
       <div class="auction-row {{ 'selected' if selected }}">
         <div class="rank">0{{ loop.index }}</div>
-        <div class="auction-copy">
-          <strong>{{ candidate.structure.underlying }} · {{ candidate.action|replace('_', ' ') }}</strong>
-          <span>Max loss {{ candidate.structure.maximum_loss|money }} · {{ candidate.richness_ratio|float|round(2) }}× move richness</span>
-        </div>
+        <div class="auction-copy"><strong>{{ candidate.structure.underlying }} · {{ candidate.action|replace('_', ' ') }}</strong><span>Max loss {{ candidate.structure.maximum_loss|money }} · {{ candidate.richness_ratio|float|round(2) }}× move richness</span></div>
         <div class="score"><span style="width: {{ [candidate.score|float / 2, 100]|min }}%"></span></div>
         <div class="auction-result">{{ 'Selected' if selected else 'Alternative' }}</div>
       </div>
       {% else %}
-      <div class="empty">No structure passed the pre-auction gates. Abstention is a successful outcome.</div>
+      <div class="empty">No structure passed the current data and liquidity gates.</div>
       {% endfor %}
     </div>
   </article>
 
   <article class="panel decision-panel">
-    <span class="kicker">02 · Constrained intelligence</span>
+    <span class="kicker">Latest model decision</span>
     <h2>“{{ decision.get('thesis', 'No valid model decision was available.') }}”</h2>
     <div class="confidence"><span style="width: {{ decision.get('confidence', 0) * 100 }}%"></span></div>
     <div class="split-list">
       <div><h3>Evidence</h3>{% for item in decision.get('evidence', []) %}<p><i>+</i>{{ item }}</p>{% endfor %}</div>
       <div><h3>Invalidation</h3>{% for item in decision.get('invalidation', []) %}<p><i>×</i>{{ item }}</p>{% endfor %}</div>
     </div>
+    {% if passport.get('run_id') %}<a class="text-link" href="/runs/{{ passport.run_id }}">Open decision passport →</a>{% endif %}
   </article>
 </section>
 
 <section class="shell panel section-gap guardrail-panel">
-  <div class="panel-head"><div><span class="kicker">03 · Policy</span><h2>Hard gates outrank confidence.</h2></div><span class="mono">{{ risk.get('checks', [])|length }} checks</span></div>
+  <div class="panel-head"><div><span class="kicker">Deterministic policy</span><h2>Hard gates</h2></div><span class="mono">{{ risk.get('checks', [])|length }} checks</span></div>
   <div class="checks-grid">
     {% for check in risk.get('checks', []) %}
     <div class="check {{ 'pass' if check.passed else 'fail' }}"><span>{{ '✓' if check.passed else '×' }}</span><div><strong>{{ check.name|replace('_', ' ') }}</strong><small>{{ check.actual }} / {{ check.limit }}</small></div></div>
     {% endfor %}
   </div>
 </section>
-
-<section class="shell final-cta section-gap">
-  <div><span class="kicker">Decision Passport</span><h2>One audit trail.</h2><p>Evidence, decision, risk, execution, outcome.</p></div>
-  {% if passport.get('run_id') %}<a class="button primary" href="/runs/{{ passport.run_id }}">Inspect the audit trail <span>→</span></a>{% endif %}
-</section>
 {% endblock %}
 {% block scripts %}
 <script>
   (() => {
-    const refreshed = document.getElementById("last-refreshed");
-    if (refreshed) {
-      const timestamp = new Date(refreshed.dateTime);
-      refreshed.textContent = timestamp.toLocaleTimeString([], {
-        hour: "numeric",
-        minute: "2-digit",
-        second: "2-digit"
-      });
-    }
-    window.setTimeout(() => window.location.reload(), 30000);
+    const intervalMs = 15000;
+    const feed = document.getElementById("activity-feed");
+    const updated = document.getElementById("last-updated");
+    const connection = document.getElementById("connection-state");
+    const consoleGrid = document.querySelector(".ops-grid");
+
+    const localTime = (value) => new Date(value).toLocaleTimeString([], {
+      hour: "numeric", minute: "2-digit", second: "2-digit"
+    });
+
+    const setUpdated = (value) => {
+      updated.dateTime = value;
+      updated.textContent = localTime(value);
+    };
+
+    const renderActivity = (entries) => {
+      feed.replaceChildren();
+      if (!entries.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "Waiting for the first audited cycle.";
+        feed.append(empty);
+        return;
+      }
+      for (const entry of entries) {
+        const row = document.createElement("a");
+        row.className = `activity-entry ${entry.tone}`;
+        row.href = entry.href;
+        const time = document.createElement("time");
+        time.dateTime = entry.timestamp;
+        time.textContent = localTime(entry.timestamp);
+        const copy = document.createElement("span");
+        copy.className = "activity-copy";
+        const label = document.createElement("strong");
+        label.textContent = entry.label;
+        const detail = document.createElement("small");
+        detail.textContent = entry.detail;
+        copy.append(label, detail);
+        const status = document.createElement("span");
+        status.className = "activity-status";
+        status.textContent = entry.status;
+        row.append(time, copy, status);
+        feed.append(row);
+      }
+    };
+
+    const refresh = async () => {
+      try {
+        const [activityResponse, healthResponse] = await Promise.all([
+          fetch("/api/activity", {cache: "no-store"}),
+          fetch("/api/health", {cache: "no-store"})
+        ]);
+        if (!activityResponse.ok) throw new Error("activity unavailable");
+        const [payload, health] = await Promise.all([
+          activityResponse.json(), healthResponse.json()
+        ]);
+        const previousRun = consoleGrid.dataset.latestRunId;
+        if (payload.latest_run_id && previousRun !== payload.latest_run_id) {
+          window.location.reload();
+          return;
+        }
+        renderActivity(payload.entries);
+        setUpdated(payload.generated_at);
+        connection.textContent = health.status === "healthy" ? "Live" : "Degraded";
+      } catch (_) {
+        connection.textContent = "Retrying";
+      }
+    };
+
+    setUpdated(updated.dateTime);
+    window.setInterval(refresh, intervalMs);
   })();
 </script>
 {% endblock %}

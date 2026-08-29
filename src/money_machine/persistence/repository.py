@@ -657,6 +657,72 @@ class AuditRepository:
         with self.database.session() as session:
             return session.scalar(select(AgentRunORM.passport_json).where(AgentRunORM.id == run_id))
 
+    def recent_activity(self, *, limit: int = 12) -> list[dict[str, Any]]:
+        """Return a redacted operator feed derived from completed audit records."""
+        with self.database.session() as session:
+            runs = list(
+                session.scalars(
+                    select(AgentRunORM)
+                    .where(
+                        AgentRunORM.completed_at.is_not(None),
+                        AgentRunORM.passport_json.is_not(None),
+                    )
+                    .order_by(desc(AgentRunORM.completed_at))
+                    .limit(limit)
+                )
+            )
+
+        activity: list[dict[str, Any]] = []
+        for run in runs:
+            passport = run.passport_json or {}
+            decision = passport.get("decision", {})
+            risk = passport.get("risk", {})
+            execution = passport.get("execution", {})
+            operational = passport.get("operational_state", {})
+            action = str(decision.get("action") or "abstain").replace("_", " ")
+            failed_checks = [
+                str(check.get("name") or "policy").replace("_", " ")
+                for check in risk.get("checks", [])
+                if isinstance(check, dict) and not check.get("passed", False)
+            ]
+            if run.incident or passport.get("status") == "failed_closed":
+                label = "Cycle failed closed"
+                detail = "System halted the cycle before execution"
+                status = "halted"
+                tone = "danger"
+            elif execution.get("submitted"):
+                label = "Order activity"
+                detail = f"{action} · {execution.get('status', 'submitted')}"
+                status = "submitted"
+                tone = "success"
+            elif risk.get("approved"):
+                label = "Risk approved"
+                detail = f"{action} · no duplicate order submitted"
+                status = "approved"
+                tone = "success"
+            else:
+                label = "Cash retained"
+                reasons = ", ".join(failed_checks[:2]) or "no eligible candidate"
+                detail = f"{action} · {reasons}"
+                status = "abstain"
+                tone = "neutral"
+            state = str(operational.get("execution_state") or "observe_only").replace("_", " ")
+            completed_at = _safe_datetime(run.completed_at or run.started_at)
+            activity.append(
+                {
+                    "timestamp": completed_at.isoformat(),
+                    "display_time": completed_at.strftime("%H:%M:%S"),
+                    "label": label,
+                    "detail": detail,
+                    "status": status,
+                    "tone": tone,
+                    "state": state,
+                    "run_id": run.id,
+                    "href": f"/runs/{run.id}",
+                }
+            )
+        return activity
+
     def dashboard_summary(self) -> dict[str, Any]:
         with self.database.session() as session:
             latest_equity = session.scalar(
@@ -664,9 +730,12 @@ class AuditRepository:
             )
             equities = list(
                 session.scalars(
-                    select(EquitySnapshotORM).order_by(EquitySnapshotORM.observed_at).limit(120)
+                    select(EquitySnapshotORM)
+                    .order_by(desc(EquitySnapshotORM.observed_at))
+                    .limit(120)
                 )
             )
+            equities.reverse()
             state = session.scalar(
                 select(SystemStateORM).order_by(desc(SystemStateORM.id)).limit(1)
             )
