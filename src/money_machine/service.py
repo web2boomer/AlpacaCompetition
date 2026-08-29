@@ -158,6 +158,7 @@ class AgentService:
                 official=official,
                 peak_equity=peak_equity,
                 positions=list(positions),
+                observed_at=now,
             )
             report = build_candidates(snapshots, chains, now)
             self.repository.persist_candidates(run_id, report.candidates)

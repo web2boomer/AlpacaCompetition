@@ -78,8 +78,9 @@ class AuditRepository:
         official: bool,
         peak_equity: Decimal,
         positions: list[dict[str, Any]],
+        observed_at: datetime | None = None,
     ) -> None:
-        now = max(snapshot.observed_at for snapshot in snapshots)
+        now = observed_at or max(snapshot.observed_at for snapshot in snapshots)
         with self.database.session() as session:
             for snapshot in snapshots:
                 features = snapshot.model_dump(mode="json")
@@ -726,18 +727,26 @@ class AuditRepository:
     def dashboard_summary(self) -> dict[str, Any]:
         latest_passport = self.latest_passport()
         official = bool(latest_passport and latest_passport.get("official"))
+        account = latest_passport.get("account", {}) if latest_passport else {}
+        fingerprint = account.get("fingerprint") if isinstance(account, dict) else None
         with self.database.session() as session:
-            latest_equity = session.scalar(
+            equity_query = (
                 select(EquitySnapshotORM)
+                .join(AgentRunORM, AgentRunORM.id == EquitySnapshotORM.agent_run_id)
                 .where(EquitySnapshotORM.official == official)
-                .order_by(desc(EquitySnapshotORM.observed_at))
+            )
+            if fingerprint:
+                equity_query = equity_query.where(
+                    AgentRunORM.passport_json["account"]["fingerprint"].as_string()
+                    == fingerprint
+                )
+            latest_equity = session.scalar(
+                equity_query.order_by(desc(AgentRunORM.started_at))
                 .limit(1)
             )
             equities = list(
                 session.scalars(
-                    select(EquitySnapshotORM)
-                    .where(EquitySnapshotORM.official == official)
-                    .order_by(desc(EquitySnapshotORM.observed_at))
+                    equity_query.order_by(desc(AgentRunORM.started_at))
                     .limit(120)
                 )
             )
