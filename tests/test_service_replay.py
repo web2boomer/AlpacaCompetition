@@ -82,9 +82,9 @@ async def test_replay_end_to_end_generates_decision_passport(
     assert outcome.passport["risk"]["approved"]
     checks = {item["name"]: item for item in outcome.passport["risk"]["checks"]}
     assert "applied=true" in checks["high_conviction_index_tier"]["actual"]
-    assert checks["effective_per_structure_percent"]["actual"] == "0.01"
+    assert checks["effective_per_structure_percent"]["actual"] == "0.02"
     assert Decimal(checks["effective_per_structure_budget"]["actual"]) == (
-        Decimal(outcome.passport["account"]["equity"]) * Decimal("0.01")
+        Decimal(outcome.passport["account"]["equity"]) * Decimal("0.02")
     )
     assert outcome.passport["execution"]["order_type"] == "limit"
     assert outcome.passport["counterfactuals"]["label"].startswith("HYPOTHETICAL")

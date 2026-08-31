@@ -121,6 +121,7 @@ class Candidate(StrictModel):
     data_age_seconds: int = Field(ge=0)
     event_risk: bool
     liquidity_passed: bool
+    trend_strength: Decimal | None = Field(default=None, ge=0)
     direction_agrees: bool = True
     minimum_confidence: Decimal = Decimal("0")
     gate_evidence: tuple[str, ...]

@@ -313,16 +313,20 @@ The agent may purchase a small put debit spread when portfolio exposure breaches
 
 Competition limits:
 
-- Maximum loss per index or directional structure: 0.50% of current equity.
-- High-conviction liquid index tier: up to 1.00% of current equity only when validated
-  model confidence is at least 0.80, candidate richness is at least 1.50, and every
-  existing data, liquidity, reconciliation, event, directional, and portfolio gate passes.
-  Earnings candidates are never eligible for this tier.
+- Maximum loss per index or directional structure: 0.75% of current equity.
+- High-conviction liquid index tier: up to 2.00% of current equity only when validated
+  model confidence is at least 0.80 and every existing data, liquidity, reconciliation,
+  event, directional, and portfolio gate passes. Premium-selling index condors additionally
+  require richness of at least 1.50 and reward/risk of at least 0.25. Directional debit
+  spreads instead require deterministic absolute trend strength of at least 0.50%,
+  reward/risk of at least 2.00, and debit no greater than one-third of spread width;
+  richness never qualifies a debit spread for larger sizing because it can reflect expensive
+  option premium. Earnings candidates are never eligible for this tier.
 - Maximum loss per earnings structure: 0.35% of current equity.
-- Maximum combined SPY/QQQ/IWM cluster loss: 2.00% of current equity.
-- Maximum total concurrent defined loss: 3.00% of current equity.
-- Daily realized plus unrealized loss stop: 1.00% of start-of-day equity.
-- Competition peak-to-trough drawdown stop: 2.00%.
+- Maximum combined SPY/QQQ/IWM cluster loss: 4.00% of current equity.
+- Maximum total concurrent defined loss: 5.00% of current equity.
+- Daily realized plus unrealized loss stop: 2.00% of start-of-day equity.
+- Competition peak-to-trough drawdown stop: 4.00%.
 - Maximum three open alpha structures.
 - Maximum one pending entry per underlying.
 - No pyramiding, adding to, or resizing an existing managed structure.

@@ -220,6 +220,7 @@ def _build_directional(
         data_age_seconds=age,
         event_risk=False,
         liquidity_passed=True,
+        trend_strength=abs(snapshot.trend_return_pct),
         direction_agrees=True,
         minimum_confidence=DIRECTIONAL_MIN_CONFIDENCE,
         gate_evidence=(

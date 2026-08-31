@@ -10,19 +10,24 @@ from money_machine.domain.schemas import (
     RiskDecisionResult,
 )
 
-INDEX_PER_STRUCTURE_PCT = Decimal("0.005")
-HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT = Decimal("0.01")
+INDEX_PER_STRUCTURE_PCT = Decimal("0.0075")
+HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT = Decimal("0.02")
 EARNINGS_PER_STRUCTURE_PCT = Decimal("0.0035")
 HIGH_CONVICTION_MIN_CONFIDENCE = Decimal("0.80")
 HIGH_CONVICTION_MIN_RICHNESS_RATIO = Decimal("1.50")
-INDEX_CLUSTER_PCT = Decimal("0.02")
-TOTAL_DEFINED_LOSS_PCT = Decimal("0.03")
-DAILY_LOSS_PCT = Decimal("0.01")
-COMPETITION_DRAWDOWN_PCT = Decimal("0.02")
+HIGH_CONVICTION_MIN_CONDOR_REWARD_RISK_RATIO = Decimal("0.25")
+HIGH_CONVICTION_MIN_DIRECTIONAL_TREND_STRENGTH = Decimal("0.005")
+HIGH_CONVICTION_MIN_DIRECTIONAL_REWARD_RISK_RATIO = Decimal("2.00")
+HIGH_CONVICTION_MAX_DEBIT_TO_WIDTH_RATIO = Decimal("1") / Decimal("3")
+INDEX_CLUSTER_PCT = Decimal("0.04")
+TOTAL_DEFINED_LOSS_PCT = Decimal("0.05")
+DAILY_LOSS_PCT = Decimal("0.02")
+COMPETITION_DRAWDOWN_PCT = Decimal("0.04")
 MAX_OPEN_ALPHA_STRUCTURES = 3
 MAX_DATA_AGE_SECONDS = 90
 INDEX_UNDERLYINGS = frozenset({"SPY", "QQQ", "IWM"})
 INDEX_ACTIONS = frozenset({Action.INDEX_CONDOR, Action.CALL_DEBIT_SPREAD, Action.PUT_DEBIT_SPREAD})
+DIRECTIONAL_INDEX_ACTIONS = frozenset({Action.CALL_DEBIT_SPREAD, Action.PUT_DEBIT_SPREAD})
 
 
 def evaluate_risk(
@@ -159,18 +164,69 @@ def evaluate_risk(
         False,
         RiskReason.EXISTING_STRUCTURE,
     )
+    cluster_remaining = context.equity * INDEX_CLUSTER_PCT - context.index_cluster_defined_loss
+    total_remaining = context.equity * TOTAL_DEFINED_LOSS_PCT - context.total_open_defined_loss
+    add(
+        "cluster_defined_loss_headroom",
+        cluster_remaining > 0,
+        cluster_remaining,
+        context.equity * INDEX_CLUSTER_PCT,
+        RiskReason.CLUSTER_CAP,
+    )
+    add(
+        "total_defined_loss_headroom",
+        total_remaining > 0,
+        total_remaining,
+        context.equity * TOTAL_DEFINED_LOSS_PCT,
+        RiskReason.TOTAL_CAP,
+    )
 
     index_strategy = (
         candidate.action in INDEX_ACTIONS and candidate.structure.underlying in INDEX_UNDERLYINGS
     )
     confidence = Decimal(str(decision.confidence))
-    tier_thresholds_met = (
+    reward_risk_ratio = candidate.structure.maximum_profit / candidate.structure.maximum_loss
+    spread_width = _spread_width(candidate)
+    debit_to_width_ratio = (
+        candidate.structure.net_price / spread_width
+        if candidate.action in DIRECTIONAL_INDEX_ACTIONS and spread_width > 0
+        else None
+    )
+    condor_tier_thresholds_met = (
         index_strategy
+        and candidate.action is Action.INDEX_CONDOR
         and confidence >= HIGH_CONVICTION_MIN_CONFIDENCE
         and candidate.richness_ratio >= HIGH_CONVICTION_MIN_RICHNESS_RATIO
+        and reward_risk_ratio >= HIGH_CONVICTION_MIN_CONDOR_REWARD_RISK_RATIO
     )
+    directional_tier_thresholds_met = (
+        index_strategy
+        and candidate.action in DIRECTIONAL_INDEX_ACTIONS
+        and confidence >= HIGH_CONVICTION_MIN_CONFIDENCE
+        and candidate.trend_strength is not None
+        and candidate.trend_strength >= HIGH_CONVICTION_MIN_DIRECTIONAL_TREND_STRENGTH
+        and reward_risk_ratio >= HIGH_CONVICTION_MIN_DIRECTIONAL_REWARD_RISK_RATIO
+        and debit_to_width_ratio is not None
+        and debit_to_width_ratio <= HIGH_CONVICTION_MAX_DEBIT_TO_WIDTH_RATIO
+    )
+    tier_thresholds_met = condor_tier_thresholds_met or directional_tier_thresholds_met
     hard_gates_passed = all(check.passed for check in checks)
     high_conviction_applied = tier_thresholds_met and hard_gates_passed
+    qualification_path = (
+        "condor"
+        if candidate.action is Action.INDEX_CONDOR
+        else "directional"
+        if candidate.action in DIRECTIONAL_INDEX_ACTIONS
+        else "ineligible"
+    )
+    qualification_failures = _high_conviction_failures(
+        candidate=candidate,
+        confidence=confidence,
+        index_strategy=index_strategy,
+        reward_risk_ratio=reward_risk_ratio,
+        debit_to_width_ratio=debit_to_width_ratio,
+        hard_gate_failures=tuple(check.name for check in checks if not check.passed),
+    )
     if candidate.action is Action.EARNINGS_CONDOR:
         per_pct = EARNINGS_PER_STRUCTURE_PCT
         tier_name = "earnings"
@@ -186,14 +242,24 @@ def evaluate_risk(
         True,
         (
             f"applied={str(high_conviction_applied).lower()}; tier={tier_name}; "
-            f"confidence={confidence}; richness_ratio={candidate.richness_ratio}; "
+            f"qualification_path={qualification_path}; confidence={confidence}; "
+            f"richness_ratio={candidate.richness_ratio}; "
+            f"trend_strength={candidate.trend_strength}; reward_risk={reward_risk_ratio}; "
+            f"debit_to_width={debit_to_width_ratio}; "
+            f"liquidity_passed={str(candidate.liquidity_passed).lower()}; "
             f"index_strategy={str(index_strategy).lower()}; "
-            f"hard_gates_passed={str(hard_gates_passed).lower()}"
+            f"hard_gates_passed={str(hard_gates_passed).lower()}; "
+            f"qualification_reason={','.join(qualification_failures) or 'qualified'}"
         ),
         (
-            f"confidence>={HIGH_CONVICTION_MIN_CONFIDENCE}; "
-            f"richness_ratio>={HIGH_CONVICTION_MIN_RICHNESS_RATIO}; "
-            "index_strategy=true; hard_gates_passed=true"
+            f"condor(confidence>={HIGH_CONVICTION_MIN_CONFIDENCE}, "
+            f"richness_ratio>={HIGH_CONVICTION_MIN_RICHNESS_RATIO}, "
+            f"reward_risk>={HIGH_CONVICTION_MIN_CONDOR_REWARD_RISK_RATIO}) OR "
+            f"directional(confidence>={HIGH_CONVICTION_MIN_CONFIDENCE}, "
+            f"trend_strength>={HIGH_CONVICTION_MIN_DIRECTIONAL_TREND_STRENGTH}, "
+            f"reward_risk>={HIGH_CONVICTION_MIN_DIRECTIONAL_REWARD_RISK_RATIO}, "
+            f"debit_to_width<={HIGH_CONVICTION_MAX_DEBIT_TO_WIDTH_RATIO}); "
+            "index_strategy=true; liquidity and all hard gates pass"
         ),
         RiskReason.PER_STRUCTURE_CAP,
     )
@@ -218,8 +284,6 @@ def evaluate_risk(
     if not hard_gates_passed:
         return _rejected(checks)
 
-    cluster_remaining = context.equity * INDEX_CLUSTER_PCT - context.index_cluster_defined_loss
-    total_remaining = context.equity * TOTAL_DEFINED_LOSS_PCT - context.total_open_defined_loss
     available = max(Decimal("0"), min(per_budget, cluster_remaining, total_remaining))
     quantity = int(
         (available / candidate.structure.maximum_loss).to_integral_value(rounding=ROUND_FLOOR)
@@ -267,3 +331,47 @@ def _rejected(checks: list[RiskCheck]) -> RiskDecisionResult:
         reason_codes=reasons or (RiskReason.INVALID_STRUCTURE,),
         checks=tuple(checks),
     )
+
+
+def _spread_width(candidate: Candidate) -> Decimal:
+    strikes = sorted({leg.strike for leg in candidate.structure.legs})
+    if len(strikes) != 2:
+        return Decimal("0")
+    return strikes[1] - strikes[0]
+
+
+def _high_conviction_failures(
+    *,
+    candidate: Candidate,
+    confidence: Decimal,
+    index_strategy: bool,
+    reward_risk_ratio: Decimal,
+    debit_to_width_ratio: Decimal | None,
+    hard_gate_failures: tuple[str, ...],
+) -> tuple[str, ...]:
+    failures: list[str] = []
+    if not index_strategy:
+        failures.append("not_eligible_index_strategy")
+    if confidence < HIGH_CONVICTION_MIN_CONFIDENCE:
+        failures.append("confidence_below_threshold")
+    if candidate.action is Action.INDEX_CONDOR:
+        if candidate.richness_ratio < HIGH_CONVICTION_MIN_RICHNESS_RATIO:
+            failures.append("richness_below_threshold")
+        if reward_risk_ratio < HIGH_CONVICTION_MIN_CONDOR_REWARD_RISK_RATIO:
+            failures.append("condor_reward_risk_below_threshold")
+    elif candidate.action in DIRECTIONAL_INDEX_ACTIONS:
+        if (
+            candidate.trend_strength is None
+            or candidate.trend_strength < HIGH_CONVICTION_MIN_DIRECTIONAL_TREND_STRENGTH
+        ):
+            failures.append("directional_trend_below_threshold")
+        if reward_risk_ratio < HIGH_CONVICTION_MIN_DIRECTIONAL_REWARD_RISK_RATIO:
+            failures.append("directional_reward_risk_below_threshold")
+        if (
+            debit_to_width_ratio is None
+            or debit_to_width_ratio > HIGH_CONVICTION_MAX_DEBIT_TO_WIDTH_RATIO
+        ):
+            failures.append("directional_debit_to_width_above_threshold")
+    for name in hard_gate_failures:
+        failures.append(f"hard_gate_failed:{name}")
+    return tuple(failures)
