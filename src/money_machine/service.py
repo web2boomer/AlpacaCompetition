@@ -374,7 +374,7 @@ class AgentService:
         if clock.flat_target_reached and (positions or self.repository.pending_managed_orders()):
             incidents.append("flat_target_exposure_remaining")
         for order in self.repository.pending_managed_orders():
-            if clock.force_flatten_all and order.is_closing:
+            if order.is_closing:
                 broker_order = await adapter.order_by_id(order.broker_order_id)
                 broker_status = str(broker_order.get("status") or "").lower()
                 if broker_status in {"canceled", "expired", "filled", "rejected"}:

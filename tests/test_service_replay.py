@@ -65,6 +65,30 @@ async def seed_managed_position(settings, repository, replay_adapter, *, quantit
     return first
 
 
+async def seed_pending_close(settings, repository, replay_adapter):
+    await seed_managed_position(settings, repository, replay_adapter)
+    service = AgentService(production_settings(settings), repository)
+    await service.run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=FORCED_FLATTEN_STARTS_AT,
+        mode=RunMode.LIVE,
+    )
+    close_request = replay_adapter.submitted_requests[-1]
+    assert close_request.is_closing
+    with repository.database.session() as session:
+        close_order = session.scalar(
+            select(BrokerOrderORM).where(
+                BrokerOrderORM.client_order_id == close_request.client_order_id
+            )
+        )
+        assert close_order is not None
+        close_order.status = "pending_new"
+        close_order.submitted_at = replay_adapter.observed_at - timedelta(minutes=5)
+    replay_adapter.canceled_order_ids.clear()
+    return service, close_request, replay_adapter.submitted_orders[-1].broker_order_id
+
+
 @pytest.mark.asyncio
 async def test_replay_end_to_end_generates_decision_passport(
     settings, repository, replay_adapter
@@ -531,6 +555,114 @@ async def test_fresh_pending_entry_is_canceled_at_cutoff_without_replacement(
     assert len(replay_adapter.submitted_requests) == request_count
     assert any(
         event["event"] == "entry_order_canceled_at_cutoff"
+        for event in outcome.passport["operational_state"]["lifecycle_events"]
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("broker_status", ["filled", "canceled", "expired", "rejected"])
+async def test_terminal_pending_close_is_refreshed_without_cancel_or_replacement(
+    settings, repository, replay_adapter, monkeypatch, broker_status
+) -> None:
+    service, close_request, _close_broker_id = await seed_pending_close(
+        settings, repository, replay_adapter
+    )
+    replay_adapter.data["positions"] = []
+    repository.set_kill_switch(active=True, now=replay_adapter.observed_at)
+
+    async def terminal_order(_broker_order_id: str):
+        return {"status": broker_status}
+
+    monkeypatch.setattr(replay_adapter, "order_by_id", terminal_order)
+    request_count = len(replay_adapter.submitted_requests)
+
+    outcome = await service.run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at + timedelta(minutes=5),
+        mode=RunMode.LIVE,
+    )
+
+    assert replay_adapter.canceled_order_ids == []
+    assert len(replay_adapter.submitted_requests) == request_count
+    events = outcome.passport["operational_state"]["lifecycle_events"]
+    assert any(
+        event["event"] == "closing_order_terminal_reconciled" and event["status"] == broker_status
+        for event in events
+    )
+    assert not any(event["event"] == "order_replaced_with_bounded_concession" for event in events)
+    with repository.database.session() as session:
+        close_order = session.scalar(
+            select(BrokerOrderORM).where(
+                BrokerOrderORM.client_order_id == close_request.client_order_id
+            )
+        )
+        assert close_order is not None
+        assert close_order.status == broker_status
+
+
+@pytest.mark.asyncio
+async def test_filled_close_refresh_prevents_already_filled_cancel_regression(
+    settings, repository, replay_adapter, monkeypatch
+) -> None:
+    service, _close_request, _close_broker_id = await seed_pending_close(
+        settings, repository, replay_adapter
+    )
+    replay_adapter.data["positions"] = []
+    repository.set_kill_switch(active=True, now=replay_adapter.observed_at)
+
+    async def filled_order(_broker_order_id: str):
+        return {"status": "filled"}
+
+    async def cancel_would_raise_422(_broker_order_id: str):
+        raise AssertionError('cancel would reproduce Alpaca 422 "order is already filled"')
+
+    monkeypatch.setattr(replay_adapter, "order_by_id", filled_order)
+    monkeypatch.setattr(replay_adapter, "cancel_order", cancel_would_raise_422)
+
+    outcome = await service.run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at + timedelta(minutes=5),
+        mode=RunMode.LIVE,
+    )
+
+    assert outcome.passport.get("status") != "failed_closed"
+    assert any(
+        event["event"] == "closing_order_terminal_reconciled" and event["status"] == "filled"
+        for event in outcome.passport["operational_state"]["lifecycle_events"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_nonterminal_pending_close_keeps_existing_stale_replacement_path(
+    settings, repository, replay_adapter, monkeypatch
+) -> None:
+    service, _close_request, close_broker_id = await seed_pending_close(
+        settings, repository, replay_adapter
+    )
+    repository.set_kill_switch(active=True, now=replay_adapter.observed_at)
+
+    async def pending_order(_broker_order_id: str):
+        return {"status": "pending_new"}
+
+    monkeypatch.setattr(replay_adapter, "order_by_id", pending_order)
+    request_count = len(replay_adapter.submitted_requests)
+
+    outcome = await service.run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at + timedelta(minutes=5),
+        mode=RunMode.LIVE,
+    )
+
+    assert replay_adapter.canceled_order_ids == [close_broker_id]
+    assert len(replay_adapter.submitted_requests) == request_count + 1
+    replacement = replay_adapter.submitted_requests[-1]
+    assert replacement.is_closing
+    assert replacement.attempt == 1
+    assert any(
+        event["event"] == "order_replaced_with_bounded_concession"
         for event in outcome.passport["operational_state"]["lifecycle_events"]
     )
 
