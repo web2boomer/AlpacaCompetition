@@ -16,8 +16,7 @@
   </div>
   <div class="refresh-card">
     <span class="competition-clock">
-      <small>Competition finish</small>
-      <strong id="competition-countdown" data-ends-at="{{ competition_ends_at }}" aria-live="off">Calculating…</strong>
+      <strong id="competition-countdown" data-ends-at="{{ competition_ends_at }}" aria-label="Time remaining until competition finish" aria-live="off">Calculating…</strong>
     </span>
     <span class="refresh-meta">
       <span class="live-indicator" aria-live="polite"><i></i><strong id="connection-state">Live</strong></span>
@@ -34,7 +33,6 @@
         <div class="metric-label">Paper account equity <span class="equity-source-state" id="equity-source-state">Audited cycle</span></div>
         <div class="equity-value" id="account-equity" data-baseline="100000" aria-live="polite" aria-atomic="true">{{ account.get('equity', 0)|money }}</div>
       </div>
-      <span class="mode-badge">{{ passport.get('result_label', 'NO DATA') }}</span>
     </div>
     <div class="equity-delta"><strong id="account-equity-delta">{{ '+' if account.get('pnl', 0)|float >= 0 else '' }}{{ account.get('pnl', 0)|money }}</strong> <span>from $100,000 baseline</span></div>
     <svg class="equity-chart ops-equity-chart" viewBox="0 0 720 180" role="img" aria-label="Paper-account equity curve">
