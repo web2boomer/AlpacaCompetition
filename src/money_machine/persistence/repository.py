@@ -778,6 +778,67 @@ class AuditRepository:
                 symbol = str(position.get("symbol") or "")
                 if symbol and symbol not in known_symbols:
                     incidents.append("orphaned_broker_position")
+            position_inventory = {
+                str(position.get("symbol")): Decimal(str(position.get("qty") or 0))
+                for position in positions
+                if position.get("symbol")
+            }
+            exposure_rows = list(
+                session.execute(
+                    select(BrokerOrderORM, OptionStructureORM)
+                    .join(
+                        CandidateORM,
+                        and_(
+                            CandidateORM.agent_run_id == BrokerOrderORM.agent_run_id,
+                            CandidateORM.candidate_id == BrokerOrderORM.candidate_id,
+                        ),
+                    )
+                    .join(
+                        OptionStructureORM,
+                        OptionStructureORM.candidate_row_id == CandidateORM.id,
+                    )
+                    .where(
+                        BrokerOrderORM.status.in_(
+                            (
+                                "accepted",
+                                "accepted_for_bidding",
+                                "calculated",
+                                "held",
+                                "pending_new",
+                                "pending_cancel",
+                                "pending_replace",
+                                "new",
+                                "stopped",
+                                "submitted",
+                                "partially_filled",
+                                "partially_filled_canceled",
+                                "filled",
+                                "closing",
+                            )
+                        )
+                    )
+                    .order_by(BrokerOrderORM.submitted_at, BrokerOrderORM.id)
+                )
+            )
+            established_statuses = {"filled", "closing", "partially_filled_canceled"}
+            for local_order, structure in exposure_rows:
+                if local_order.status in established_statuses:
+                    _reserve_structure_positions(
+                        position_inventory, structure.legs_json, local_order.quantity
+                    )
+            for local_order, structure in exposure_rows:
+                if local_order.status in established_statuses:
+                    continue
+                if not _consume_complete_structure_positions(
+                    position_inventory, structure.legs_json, local_order.quantity
+                ):
+                    continue
+                local_order.status = "filled"
+                raw_json = dict(local_order.raw_json)
+                raw_json["remaining_quantity"] = "0"
+                raw_json["status_normalized_from_positions"] = True
+                local_order.raw_json = raw_json
+                local_order.last_seen_at = now or local_order.last_seen_at
             if authoritative_absence:
                 position_symbols = {
                     str(position.get("symbol")) for position in positions if position.get("symbol")
@@ -1095,3 +1156,37 @@ def _remaining_order_quantity(payload: dict[str, Any], fallback: int) -> Decimal
     quantity = Decimal(str(payload.get("qty") or fallback))
     filled = Decimal(str(payload.get("filled_qty") or 0))
     return max(Decimal("0"), quantity - filled)
+
+
+def _leg_direction(leg: dict[str, Any]) -> Decimal:
+    return Decimal("1") if str(leg.get("side") or "").lower() == "buy" else Decimal("-1")
+
+
+def _reserve_structure_positions(
+    inventory: dict[str, Decimal], legs: list[dict[str, Any]], quantity: int
+) -> None:
+    for leg in legs:
+        symbol = str(leg.get("symbol") or "")
+        direction = _leg_direction(leg)
+        available = inventory.get(symbol, Decimal("0")) * direction
+        if available <= 0:
+            continue
+        required = Decimal(str(leg.get("ratio_qty") or 1)) * quantity
+        reserved = min(available, required)
+        inventory[symbol] = inventory.get(symbol, Decimal("0")) - direction * reserved
+
+
+def _consume_complete_structure_positions(
+    inventory: dict[str, Decimal], legs: list[dict[str, Any]], quantity: int
+) -> bool:
+    requirements: list[tuple[str, Decimal, Decimal]] = []
+    for leg in legs:
+        symbol = str(leg.get("symbol") or "")
+        direction = _leg_direction(leg)
+        required = Decimal(str(leg.get("ratio_qty") or 1)) * quantity
+        if not symbol or inventory.get(symbol, Decimal("0")) * direction < required:
+            return False
+        requirements.append((symbol, direction, required))
+    for symbol, direction, required in requirements:
+        inventory[symbol] -= direction * required
+    return True

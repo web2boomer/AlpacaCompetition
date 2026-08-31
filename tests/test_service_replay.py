@@ -151,6 +151,44 @@ async def test_broker_pending_statuses_reserve_risk_and_underlying(
 
 
 @pytest.mark.asyncio
+async def test_complete_broker_positions_normalize_pending_parent_to_filled(
+    settings, repository, replay_adapter
+) -> None:
+    outcome = await AgentService(settings, repository).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at,
+        mode=RunMode.REPLAY,
+    )
+    with repository.database.session() as session:
+        order = session.scalar(
+            select(BrokerOrderORM).where(BrokerOrderORM.agent_run_id == outcome.run_id)
+        )
+        assert order is not None
+        order.status = "pending_new"
+    selected = next(
+        candidate
+        for candidate in outcome.passport["candidates"]
+        if candidate["candidate_id"] == outcome.passport["decision"]["candidate_id"]
+    )
+    positions = [
+        {
+            "symbol": leg["symbol"],
+            "qty": str(leg["ratio_qty"] if leg["side"] == "buy" else -leg["ratio_qty"]),
+        }
+        for leg in selected["structure"]["legs"]
+    ]
+
+    clean, incidents = repository.reconcile_broker_state([], positions)
+
+    assert clean is True
+    assert incidents == ()
+    managed = repository.open_managed_structures()
+    assert len(managed) == 1
+    assert managed[0].status == "filled"
+
+
+@pytest.mark.asyncio
 async def test_kill_switch_blocks_entry(settings, repository, replay_adapter) -> None:
     repository.set_kill_switch(active=True, now=replay_adapter.observed_at)
     outcome = await AgentService(settings, repository).run_cycle(
