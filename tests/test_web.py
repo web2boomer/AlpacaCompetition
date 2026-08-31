@@ -31,6 +31,9 @@ def test_dashboard_and_health(settings, database) -> None:
     assert 'data-ends-at="2026-09-04T13:30:00+00:00"' in response.text
     assert "window.setInterval(renderCountdown, 1000)" in response.text
     assert "Official competition performance" in response.text
+    assert 'class="shell panel section-gap performance-overview"' in response.text
+    assert 'aria-label="Current agent metrics"' in response.text
+    assert 'class="shell metric-grid ops-metrics"' not in response.text
     assert "Alpaca remains authoritative" in response.text
     assert "System health" in response.text
     assert "https://aob.io" in response.text

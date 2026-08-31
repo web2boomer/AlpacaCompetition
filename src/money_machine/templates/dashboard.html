@@ -63,13 +63,13 @@
   </article>
 </section>
 
-<section class="shell panel section-gap" aria-label="Official competition performance">
+<section class="shell panel section-gap performance-overview" aria-labelledby="performance-title">
   <div class="panel-head">
-    <div><span class="kicker">Verified account evidence</span><h2>Official competition performance</h2></div>
+    <div><span class="kicker">Verified account evidence</span><h2 id="performance-title">Official competition performance</h2></div>
     <span class="mode-badge">{{ performance.get('scoring_window_state', 'pre_scoring')|replace('_', ' ') }}</span>
   </div>
   {% if performance.get('available') %}
-  <div class="metric-grid ops-metrics performance-grid">
+  <div class="metric-grid ops-metrics performance-grid" aria-label="Verified account metrics">
     <article class="metric-card"><div class="metric-label">Starting equity</div><div class="metric-primary">{{ performance.starting_equity|money }}</div><p>Fixed competition baseline</p></article>
     <article class="metric-card"><div class="metric-label">Latest Alpaca equity</div><div class="metric-primary">{{ performance.latest_equity|money }}</div><p>{{ performance.latest_snapshot_at }}</p></article>
     <article class="metric-card"><div class="metric-label">Official P&amp;L</div><div class="metric-primary">{{ performance.dollar_pnl|money }}</div><p>{{ performance.percentage_return }}% return</p></article>
@@ -80,29 +80,28 @@
   {% else %}
   <div class="empty">No verified scoring-window equity observation is available yet. Alpaca remains authoritative for the official result.</div>
   {% endif %}
-</section>
-
-<section class="shell metric-grid ops-metrics" aria-label="Current agent metrics">
-  <article class="metric-card">
-    <div class="metric-label">Execution state</div>
-    <div class="metric-primary state"><i></i>{{ state.get('execution_state', 'observe_only')|replace('_', ' ') }}</div>
-    <p>{{ 'Reconciliation clean' if state.get('reconciliation_clean', True) else 'Entries halted by reconciliation' }}</p>
-  </article>
-  <article class="metric-card">
-    <div class="metric-label">Latest decision</div>
-    <div class="metric-primary">{{ decision.get('action', 'abstain')|replace('_', ' ') }}</div>
-    <p>{{ (decision.get('confidence', 0) * 100)|round|int }}% constrained-model confidence</p>
-  </article>
-  <article class="metric-card">
-    <div class="metric-label">Awarded max risk</div>
-    <div class="metric-primary">{{ risk.get('awarded_risk', 0)|money }}</div>
-    <p>{{ risk.get('quantity', 0) }} contract{{ '' if risk.get('quantity', 0) == 1 else 's' }} · rounded down</p>
-  </article>
-  <article class="metric-card">
-    <div class="metric-label">Order state</div>
-    <div class="metric-primary">{{ execution.get('status', 'not submitted')|replace('_', ' ') }}</div>
-    <p>{{ 'Multi-leg limit · idempotent' if execution.get('submitted') else 'Cash retained' }}</p>
-  </article>
+  <div class="metric-grid performance-control-grid" aria-label="Current agent metrics">
+    <article class="metric-card">
+      <div class="metric-label">Execution state</div>
+      <div class="metric-primary state"><i></i>{{ state.get('execution_state', 'observe_only')|replace('_', ' ') }}</div>
+      <p>{{ 'Reconciliation clean' if state.get('reconciliation_clean', True) else 'Entries halted by reconciliation' }}</p>
+    </article>
+    <article class="metric-card">
+      <div class="metric-label">Latest decision</div>
+      <div class="metric-primary">{{ decision.get('action', 'abstain')|replace('_', ' ') }}</div>
+      <p>{{ (decision.get('confidence', 0) * 100)|round|int }}% constrained-model confidence</p>
+    </article>
+    <article class="metric-card">
+      <div class="metric-label">Awarded max risk</div>
+      <div class="metric-primary">{{ risk.get('awarded_risk', 0)|money }}</div>
+      <p>{{ risk.get('quantity', 0) }} contract{{ '' if risk.get('quantity', 0) == 1 else 's' }} · rounded down</p>
+    </article>
+    <article class="metric-card">
+      <div class="metric-label">Order state</div>
+      <div class="metric-primary">{{ execution.get('status', 'not submitted')|replace('_', ' ') }}</div>
+      <p>{{ 'Multi-leg limit · idempotent' if execution.get('submitted') else 'Cash retained' }}</p>
+    </article>
+  </div>
 </section>
 
 <section class="shell two-col section-gap decision-workspace">
