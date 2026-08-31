@@ -11,7 +11,6 @@
 {% set performance = summary.get('performance', {}) %}
 {% set latest_activity = activity[0] if activity else {} %}
 {% set account_pnl = account.get('pnl', 0)|float %}
-{% set performance_pnl = performance.get('dollar_pnl', 0)|float %}
 <section class="ops-header shell">
   <div>
     <h1>Money Machine</h1>
@@ -22,7 +21,7 @@
     </span>
     <span class="refresh-meta">
       <span class="live-indicator" aria-live="polite"><i></i><strong id="connection-state">Live</strong></span>
-      <span>Updates every 15 seconds</span>
+      <span class="builder-credit">Built by AOB · <a href="https://www.linkedin.com/in/alexobyrne">LinkedIn</a></span>
       <span>Last update <time id="last-updated" datetime="{{ refreshed_at }}">{{ refreshed_at }}</time></span>
     </span>
   </div>
@@ -50,13 +49,11 @@
   </article>
   <article class="panel performance-overview" aria-labelledby="performance-title">
     <div class="panel-head">
-      <div><span class="kicker">Verified account evidence</span><h2 id="performance-title">Official competition performance</h2></div>
+      <h2 id="performance-title">Performance</h2>
       <span class="mode-badge">{{ performance.get('scoring_window_state', 'pre_scoring')|replace('_', ' ') }}</span>
     </div>
     {% if performance.get('available') %}
     <div class="metric-grid ops-metrics performance-grid" aria-label="Verified account metrics">
-      <article class="metric-card"><div class="metric-label">Latest Alpaca equity</div><div class="metric-primary" id="performance-latest-equity">{{ performance.latest_equity|money }}</div><p><time id="performance-latest-at" datetime="{{ performance.latest_snapshot_at }}">{{ performance.latest_snapshot_at }}</time></p></article>
-      <article class="metric-card"><div class="metric-label">Official P&amp;L</div><div class="metric-primary pnl-value {{ 'positive' if performance_pnl >= 0 else 'negative' }}" id="performance-dollar-pnl">{{ performance.dollar_pnl|money }}</div><div class="performance-return"><strong class="pnl-value {{ 'positive' if performance_pnl >= 0 else 'negative' }}" id="performance-return">{{ performance.percentage_return }}%</strong><span>return</span></div></article>
       <article class="metric-card"><div class="metric-label">Peak / max drawdown</div><div class="metric-primary">{{ performance.peak_equity|money }}</div><p>{{ performance.maximum_drawdown|money }} · {{ performance.maximum_drawdown_percent }}%</p></article>
       <article class="metric-card"><div class="metric-label">Broker exposure</div><div class="metric-primary">{{ performance.open_position_count }} positions</div><p>{{ performance.working_order_count }} working orders</p></article>
     </div>
@@ -273,10 +270,6 @@
     const accountEquityDelta = document.getElementById("account-equity-delta");
     const accountEquityReturn = document.getElementById("account-equity-return");
     const equitySourceState = document.getElementById("equity-source-state");
-    const performanceLatestEquity = document.getElementById("performance-latest-equity");
-    const performanceLatestAt = document.getElementById("performance-latest-at");
-    const performanceDollarPnl = document.getElementById("performance-dollar-pnl");
-    const performanceReturn = document.getElementById("performance-return");
     const currency = new Intl.NumberFormat("en-US", {style: "currency", currency: "USD"});
 
     const setPnlTone = (element, pnl) => {
@@ -309,17 +302,6 @@
       setPnlTone(accountEquityReturn, pnl);
       equitySourceState.textContent = "Live Alpaca";
       equitySourceState.dataset.state = "live";
-      if (performanceLatestEquity) performanceLatestEquity.textContent = currency.format(equity);
-      if (performanceDollarPnl) performanceDollarPnl.textContent = currency.format(pnl);
-      if (performanceReturn && Number.isFinite(baseline) && baseline !== 0) {
-        performanceReturn.textContent = `${((pnl / baseline) * 100).toFixed(4)}%`;
-      }
-      setPnlTone(performanceDollarPnl, pnl);
-      setPnlTone(performanceReturn, pnl);
-      if (performanceLatestAt && observedAt) {
-        performanceLatestAt.dateTime = observedAt;
-        performanceLatestAt.textContent = localTime(observedAt);
-      }
       if (observedAt) setUpdated(observedAt);
     };
 

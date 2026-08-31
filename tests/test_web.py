@@ -31,7 +31,12 @@ def test_dashboard_and_health(settings, database) -> None:
     assert 'class="refresh-meta"' in response.text
     assert 'data-ends-at="2026-09-04T13:30:00+00:00"' in response.text
     assert "window.setInterval(renderCountdown, 1000)" in response.text
-    assert "Official competition performance" in response.text
+    assert 'id="performance-title">Performance</h2>' in response.text
+    assert "Official competition performance" not in response.text
+    assert "Verified account evidence" not in response.text
+    assert "Updates every 15 seconds" not in response.text
+    assert "Built by AOB" in response.text
+    assert "https://www.linkedin.com/in/alexobyrne" in response.text
     assert 'class="shell ops-grid overview-grid"' in response.text
     assert 'class="panel performance-overview"' in response.text
     assert 'class="decision-left-stack"' in response.text
@@ -54,12 +59,12 @@ def test_dashboard_and_health(settings, database) -> None:
     assert 'id="account-equity" data-baseline="100000" aria-live="polite"' in response.text
     assert 'id="account-equity-return"' in response.text
     assert 'class="pnl-value positive"' in response.text
-    assert 'getElementById("performance-return")' in response.text
+    assert "Latest Alpaca equity" not in response.text
+    assert "Official P&amp;L" not in response.text
     assert 'fetch("/api/account", {cache: "no-store"})' in response.text
     assert 'id="equity-source-state"' in response.text
     assert "renderAccount(await accountResponse.json())" in response.text
     assert "accountEquityReturn.textContent" in response.text
-    assert "setPnlTone(performanceDollarPnl, pnl)" in response.text
     assert "8 key gates" in response.text
     assert "refresh();" in response.text
     assert "REPLAY — NOT OFFICIAL P&amp;L" not in response.text
