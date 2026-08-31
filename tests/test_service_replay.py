@@ -608,7 +608,7 @@ async def test_filled_close_refresh_prevents_already_filled_cancel_regression(
     service, _close_request, _close_broker_id = await seed_pending_close(
         settings, repository, replay_adapter
     )
-    replay_adapter.data["positions"] = []
+    replay_adapter.data["positions"] = replay_adapter.data["positions"][:2]
     repository.set_kill_switch(active=True, now=replay_adapter.observed_at)
 
     async def filled_order(_broker_order_id: str):
@@ -628,10 +628,13 @@ async def test_filled_close_refresh_prevents_already_filled_cancel_regression(
     )
 
     assert outcome.passport.get("status") != "failed_closed"
+    assert outcome.passport["operational_state"]["reconciliation_clean"] is True
+    assert outcome.passport["operational_state"]["incidents"] == []
     assert any(
         event["event"] == "closing_order_terminal_reconciled" and event["status"] == "filled"
         for event in outcome.passport["operational_state"]["lifecycle_events"]
     )
+    assert repository.open_managed_structures() == ()
 
 
 @pytest.mark.asyncio
