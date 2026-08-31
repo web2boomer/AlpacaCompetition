@@ -2,6 +2,9 @@
 .ops-header{padding:44px 0 28px;display:flex;align-items:flex-end;justify-content:space-between;gap:40px}
 .ops-header h1{font-size:clamp(38px,5vw,64px);line-height:1;letter-spacing:-.055em;margin:10px 0 8px}
 .refresh-card{min-width:250px;border-left:1px solid var(--line);padding-left:22px;display:flex;flex-direction:column;gap:7px;color:var(--muted);font:10px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.06em}
+.competition-clock{display:flex;flex-direction:column;gap:4px;margin-bottom:7px}
+.competition-clock small{color:var(--muted);font:8px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.1em}
+.competition-clock strong{color:var(--paper);font-size:15px;letter-spacing:.025em;white-space:nowrap}
 .live-indicator{display:flex;align-items:center;gap:8px;color:var(--acid)}
 .live-indicator i{width:7px;height:7px;border-radius:50%;background:var(--acid);box-shadow:0 0 14px var(--acid);animation:console-pulse 2s ease-in-out infinite}
 @keyframes console-pulse{50%{opacity:.4;box-shadow:0 0 4px var(--acid)}}
@@ -16,6 +19,7 @@
 .activity-copy{display:flex;min-width:0;flex-direction:column;gap:4px}
 .activity-copy strong{font-size:11px;letter-spacing:.01em}
 .activity-copy small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font:9px ui-monospace,SFMono-Regular,Menlo,monospace}
+.activity-reason{display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;color:#aab4ad;font-size:10px;line-height:1.45}
 .activity-status{border:1px solid var(--line);border-radius:100px;padding:5px 7px;color:var(--muted);font:8px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.06em}
 .activity-entry.success .activity-status{color:var(--acid);border-color:rgba(184,255,96,.26)}
 .activity-entry.danger .activity-status{color:var(--red);border-color:rgba(255,123,102,.3)}

@@ -14,8 +14,12 @@
   <div>
     <h1>Money Machine</h1>
   </div>
-  <div class="refresh-card" aria-live="polite">
-    <span class="live-indicator"><i></i><strong id="connection-state">Live</strong></span>
+  <div class="refresh-card">
+    <span class="competition-clock">
+      <small>Competition finish</small>
+      <strong id="competition-countdown" data-ends-at="{{ competition_ends_at }}" aria-live="off">Calculating…</strong>
+    </span>
+    <span class="live-indicator" aria-live="polite"><i></i><strong id="connection-state">Live</strong></span>
     <span>Updates every 15 seconds</span>
     <span>Last update <time id="last-updated" datetime="{{ refreshed_at }}">{{ refreshed_at }}</time></span>
   </div>
@@ -31,7 +35,11 @@
       {% for entry in activity %}
       <a class="activity-entry {{ entry.tone }}" href="{{ entry.href }}">
         <time datetime="{{ entry.timestamp }}">{{ entry.display_time }}</time>
-        <span class="activity-copy"><strong>{{ entry.label }}</strong><small>{{ entry.detail }}</small></span>
+        <span class="activity-copy">
+          <strong>{{ entry.label }}</strong>
+          <small>{{ entry.detail }}</small>
+          {% if entry.reason %}<span class="activity-reason">Why: {{ entry.reason }}</span>{% endif %}
+        </span>
         <span class="activity-status">{{ entry.status }}</span>
       </a>
       {% else %}
@@ -251,6 +259,7 @@
     const architectureLive = document.getElementById("architecture-live");
     const architectureStatus = document.getElementById("architecture-system-status");
     const architectureActivity = document.getElementById("architecture-last-activity");
+    const competitionCountdown = document.getElementById("competition-countdown");
 
     const localTime = (value) => new Date(value).toLocaleTimeString([], {
       hour: "numeric", minute: "2-digit", second: "2-digit"
@@ -259,6 +268,20 @@
     const setUpdated = (value) => {
       updated.dateTime = value;
       updated.textContent = localTime(value);
+    };
+
+    const renderCountdown = () => {
+      const remainingMs = new Date(competitionCountdown.dataset.endsAt).getTime() - Date.now();
+      if (!Number.isFinite(remainingMs) || remainingMs <= 0) {
+        competitionCountdown.textContent = "Competition complete";
+        return;
+      }
+      const remainingSeconds = Math.floor(remainingMs / 1000);
+      const days = Math.floor(remainingSeconds / 86400);
+      const hours = Math.floor((remainingSeconds % 86400) / 3600);
+      const minutes = Math.floor((remainingSeconds % 3600) / 60);
+      const seconds = remainingSeconds % 60;
+      competitionCountdown.textContent = `${days}d ${String(hours).padStart(2, "0")}h ${String(minutes).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s`;
     };
 
     const renderActivity = (entries) => {
@@ -286,6 +309,12 @@
         const detail = document.createElement("small");
         detail.textContent = entry.detail;
         copy.append(label, detail);
+        if (entry.reason) {
+          const reason = document.createElement("span");
+          reason.className = "activity-reason";
+          reason.textContent = `Why: ${entry.reason}`;
+          copy.append(reason);
+        }
         const status = document.createElement("span");
         status.className = "activity-status";
         status.textContent = entry.status;
@@ -323,6 +352,8 @@
     };
 
     setUpdated(updated.dateTime);
+    renderCountdown();
+    window.setInterval(renderCountdown, 1000);
     window.setInterval(refresh, intervalMs);
   })();
 </script>

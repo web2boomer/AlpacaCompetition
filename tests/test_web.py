@@ -1,10 +1,11 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from sqlalchemy import desc, select
 
+from money_machine.domain.enums import RunMode
 from money_machine.persistence.models import AgentRunORM, EquitySnapshotORM
 from money_machine.persistence.repository import AuditRepository
 from money_machine.web import create_app
@@ -26,6 +27,9 @@ def test_dashboard_and_health(settings, database) -> None:
     assert 'id="architecture-system-status"' in response.text
     assert "Status and timestamps refresh with the console every 15 seconds" in response.text
     assert "Last update" in response.text
+    assert "Competition finish" in response.text
+    assert 'data-ends-at="2026-09-04T13:30:00+00:00"' in response.text
+    assert "window.setInterval(renderCountdown, 1000)" in response.text
     assert "Official competition performance" in response.text
     assert "Alpaca remains authoritative" in response.text
     assert "System health" in response.text
@@ -42,6 +46,44 @@ def test_dashboard_and_health(settings, database) -> None:
     assert activity.status_code == 200
     assert activity.json()["entries"]
     assert activity.json()["latest_run_id"] == passport.json()["run_id"]
+
+
+def test_cash_retained_activity_explains_why(settings, database) -> None:
+    with TestClient(create_app(settings, database)):
+        pass
+    repository = AuditRepository(database)
+    now = datetime.now(UTC)
+    run_id, created = repository.begin_run("replay:cash-retained", RunMode.REPLAY, now)
+    assert created
+    repository.complete_run(
+        run_id,
+        completed_at=now,
+        passport={
+            "decision": {
+                "action": "abstain",
+                "thesis": (
+                    "No eligible candidates are available; all symbols failed mandatory "
+                    "liquidity gates."
+                ),
+            },
+            "candidate_rejections": {
+                "SPY": ["volume, open interest, or quote liquidity gate failed"]
+            },
+            "risk": {
+                "approved": False,
+                "reason_codes": ["model_abstained"],
+                "checks": [],
+            },
+            "execution": {"submitted": False},
+            "operational_state": {"execution_state": "observe_only"},
+        },
+    )
+
+    entry = repository.recent_activity(limit=1)[0]
+    assert entry["label"] == "Cash retained"
+    assert entry["reason"] == (
+        "No eligible candidates are available; all symbols failed mandatory liquidity gates."
+    )
 
 
 def test_live_health_is_degraded_until_mcp_cycle_and_heartbeat(settings, database) -> None:

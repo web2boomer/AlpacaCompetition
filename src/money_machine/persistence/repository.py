@@ -898,6 +898,7 @@ class AuditRepository:
             execution = passport.get("execution", {})
             operational = passport.get("operational_state", {})
             action = str(decision.get("action") or "abstain").replace("_", " ")
+            reason = ""
             failed_checks = [
                 str(check.get("name") or "policy").replace("_", " ")
                 for check in risk.get("checks", [])
@@ -922,6 +923,7 @@ class AuditRepository:
                 label = "Cash retained"
                 reasons = ", ".join(failed_checks[:2]) or "no eligible candidate"
                 detail = f"{action} · {reasons}"
+                reason = _cash_retained_reason(passport)
                 status = "abstain"
                 tone = "neutral"
             state = str(operational.get("execution_state") or "observe_only").replace("_", " ")
@@ -932,6 +934,7 @@ class AuditRepository:
                     "display_time": completed_at.strftime("%H:%M:%S"),
                     "label": label,
                     "detail": detail,
+                    "reason": reason,
                     "status": status,
                     "tone": tone,
                     "state": state,
@@ -1017,6 +1020,32 @@ def _safe_datetime(value: Any) -> datetime:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
+
+
+def _cash_retained_reason(passport: dict[str, Any]) -> str:
+    """Explain an abstention using only evidence already sealed in its passport."""
+    decision = passport.get("decision", {})
+    thesis = str(decision.get("thesis") or "").strip()
+    if thesis:
+        return thesis
+
+    rejections = passport.get("candidate_rejections", {})
+    if isinstance(rejections, dict):
+        summaries: list[str] = []
+        for symbol, raw_reasons in rejections.items():
+            reasons = raw_reasons if isinstance(raw_reasons, (list, tuple)) else [raw_reasons]
+            first_reason = next((str(item).strip() for item in reasons if str(item).strip()), "")
+            if first_reason:
+                summaries.append(f"{symbol}: {first_reason}")
+        if summaries:
+            return "; ".join(summaries[:3])
+
+    risk = passport.get("risk", {})
+    reason_codes = risk.get("reason_codes", []) if isinstance(risk, dict) else []
+    readable_codes = [str(code).replace("_", " ") for code in reason_codes if code]
+    if readable_codes:
+        return f"Policy kept the account in cash: {', '.join(readable_codes[:2])}."
+    return "No candidate cleared every mandatory data, liquidity, model, and risk gate."
 
 
 def _persisted_equity(row: EquitySnapshotORM | None) -> PersistedEquitySnapshot | None:
