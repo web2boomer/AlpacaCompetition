@@ -17,7 +17,9 @@
   </div>
   <div class="refresh-card">
     <span class="competition-clock">
-      <strong id="competition-countdown" data-ends-at="{{ competition_ends_at }}" aria-label="Time remaining until competition finish" aria-live="off">Calculating…</strong>
+      <span class="competition-clock-label">Official equity locks in</span>
+      <strong id="competition-countdown" data-locks-at="{{ official_equity_locks_at }}" aria-label="Time remaining until official equity locks in" aria-live="off">Calculating…</strong>
+      <small class="submission-window-context">Hackathon window ends <time datetime="{{ hackathon_ends_at }}">Friday 9:30 AM ET</time> · not additional trading time</small>
     </span>
     <span class="refresh-meta">
       <span class="live-indicator" aria-live="polite"><i></i><strong id="connection-state">Live</strong></span>
@@ -353,9 +355,9 @@
     };
 
     const renderCountdown = () => {
-      const remainingMs = new Date(competitionCountdown.dataset.endsAt).getTime() - Date.now();
+      const remainingMs = new Date(competitionCountdown.dataset.locksAt).getTime() - Date.now();
       if (!Number.isFinite(remainingMs) || remainingMs <= 0) {
-        competitionCountdown.textContent = "Competition complete";
+        competitionCountdown.textContent = "Official trading complete";
         return;
       }
       const remainingSeconds = Math.floor(remainingMs / 1000);

@@ -161,6 +161,7 @@ services and a Basic database, so review Render pricing before applying it.
 - Multi-leg entries are day limit orders with deterministic client IDs.
 - Stale entries are canceled and can be replaced only twice within a fixed concession budget.
 - Open positions use executable-quote profit targets, stop losses, the model's maximum holding time, and portfolio loss/drawdown exits. New entries and all working opening orders stop at Thursday's 2:30 PM ET cutoff. Forced liquidation of every managed credit and debit structure starts by 3:15 PM, the internal flat target is 3:45 PM, and Alpaca's 4:00 PM EOD equity is the authoritative measurement. Close-only recovery persists until broker positions and relevant working orders confirm flat.
+- The dashboard's primary countdown targets Thursday's authoritative 4:00 PM ET equity lock. Friday's 9:30 AM ET hackathon deadline is shown only as submission-window context, not additional trading time.
 - Counterfactual and replay data are visually and structurally separate from official P&L.
 
 See [SECURITY.md](SECURITY.md) for incident handling and disclosure.

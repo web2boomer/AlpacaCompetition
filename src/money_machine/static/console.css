@@ -2,8 +2,10 @@
 .ops-header{padding:44px 0 28px;display:flex;align-items:flex-end;justify-content:space-between;gap:40px}
 .ops-header h1{font-size:clamp(38px,5vw,64px);line-height:1;letter-spacing:-.055em;margin:10px 0 8px}
 .refresh-card{min-width:500px;border-left:1px solid var(--line);padding-left:24px;display:flex;flex-direction:column;align-items:flex-start;gap:12px;color:var(--muted);font:10px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.06em}
-.competition-clock{display:flex;min-width:0}
+.competition-clock{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:5px}
+.competition-clock-label{color:var(--acid);font-size:10px;font-weight:700;letter-spacing:.12em}
 .competition-clock strong{color:var(--paper);font-size:clamp(42px,4.3vw,64px);font-weight:700;line-height:1;letter-spacing:-.055em;white-space:nowrap}
+.submission-window-context{color:var(--muted);font-size:9px;letter-spacing:.06em}
 .refresh-meta{display:flex;min-width:0;align-items:center;flex-wrap:wrap;gap:8px 18px;color:var(--muted)}
 .builder-credit a{color:inherit;text-decoration:none;border-bottom:1px solid rgba(255,255,255,.16);padding-bottom:2px}
 .builder-credit a:hover{color:var(--paper)}

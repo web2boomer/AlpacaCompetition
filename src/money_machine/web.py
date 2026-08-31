@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 
 from money_machine.adapters.alpaca_mcp import AlpacaMcpV2Adapter, parse_occ_symbol
 from money_machine.adapters.replay import ReplayAlpacaAdapter
-from money_machine.domain.clock import BASELINE_EQUITY, ENDS_AT
+from money_machine.domain.clock import BASELINE_EQUITY, ENDS_AT, EOD_EQUITY_SNAPSHOT_AT
 from money_machine.domain.enums import RunMode
 from money_machine.model_provider import ReplayModelProvider
 from money_machine.overnight import provisional_overnight_mark
@@ -94,7 +94,8 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
                 "chart": chart,
                 "activity": repository.recent_activity(),
                 "replay_enabled": app_settings.run_mode is RunMode.REPLAY,
-                "competition_ends_at": ENDS_AT.isoformat(),
+                "official_equity_locks_at": EOD_EQUITY_SNAPSHOT_AT.isoformat(),
+                "hackathon_ends_at": ENDS_AT.isoformat(),
                 "refreshed_at": datetime.now(UTC).isoformat(),
             },
         )

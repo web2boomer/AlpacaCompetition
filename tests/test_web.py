@@ -28,9 +28,14 @@ def test_dashboard_and_health(settings, database) -> None:
     assert 'id="architecture-system-status"' in response.text
     assert "Status and timestamps refresh with the console every 15 seconds" in response.text
     assert "Last update" in response.text
-    assert 'aria-label="Time remaining until competition finish"' in response.text
+    assert "Official equity locks in" in response.text
+    assert 'aria-label="Time remaining until official equity locks in"' in response.text
     assert 'class="refresh-meta"' in response.text
-    assert 'data-ends-at="2026-09-04T13:30:00+00:00"' in response.text
+    assert 'data-locks-at="2026-09-03T20:00:00+00:00"' in response.text
+    assert 'datetime="2026-09-04T13:30:00+00:00"' in response.text
+    assert "not additional trading time" in response.text
+    assert "Official trading complete" in response.text
+    assert "data-ends-at=" not in response.text
     assert "window.setInterval(renderCountdown, 1000)" in response.text
     assert 'id="performance-title">Performance</h2>' in response.text
     assert "Official competition performance" not in response.text

@@ -98,3 +98,9 @@ def test_official_performance_classification_boundaries(moment, official) -> Non
 def test_naive_datetime_rejected() -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
         competition_clock(SCORING_STARTS_AT.replace(tzinfo=None), has_exposure=False)
+
+
+def test_authoritative_equity_lock_precedes_formal_hackathon_end() -> None:
+    assert EOD_EQUITY_SNAPSHOT_AT.isoformat() == "2026-09-03T20:00:00+00:00"
+    assert ENDS_AT.isoformat() == "2026-09-04T13:30:00+00:00"
+    assert EOD_EQUITY_SNAPSHOT_AT < ENDS_AT
