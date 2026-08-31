@@ -173,7 +173,11 @@ class AlpacaMcpV2Adapter:
             underlying, expiration, right, strike = parsed
             raw = _as_dict(raw_snapshot)
             latest = _as_dict(raw.get("latest_quote") or raw.get("latestQuote") or {})
+            daily = _as_dict(raw.get("daily_bar") or raw.get("dailyBar") or {})
             greeks = _as_dict(raw.get("greeks") or {})
+            volume = _first_present(raw, "volume", "v")
+            if volume is None:
+                volume = _first_present(daily, "volume", "v")
             try:
                 quote = OptionQuote(
                     symbol=option_symbol,
@@ -183,8 +187,12 @@ class AlpacaMcpV2Adapter:
                     strike=strike,
                     bid=_decimal(latest.get("bid_price") or latest.get("bp")),
                     ask=_decimal(latest.get("ask_price") or latest.get("ap")),
-                    volume=int(raw.get("volume") or 0),
-                    open_interest=int(raw.get("open_interest") or raw.get("openInterest") or 0),
+                    volume=_optional_int(volume),
+                    open_interest=_optional_int(
+                        _first_present(raw, "open_interest", "openInterest")
+                    ),
+                    bid_size=_optional_int(_first_present(latest, "bid_size", "bs")),
+                    ask_size=_optional_int(_first_present(latest, "ask_size", "as")),
                     implied_volatility=_decimal(
                         raw.get("implied_volatility") or raw.get("impliedVolatility")
                     ),
@@ -330,6 +338,22 @@ def _decimal(value: Any) -> Decimal:
         return Decimal(str(value or "0"))
     except Exception as exc:
         raise AlpacaMcpError("invalid numeric field in Alpaca response") from exc
+
+
+def _first_present(payload: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in payload and payload[key] is not None:
+            return payload[key]
+    return None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise AlpacaMcpError("invalid integer field in Alpaca response") from exc
 
 
 def _parse_time(value: Any) -> datetime:

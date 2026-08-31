@@ -40,8 +40,10 @@ class OptionQuote(StrictModel):
     strike: Decimal
     bid: Decimal = Field(ge=0)
     ask: Decimal = Field(ge=0)
-    volume: int = Field(ge=0)
-    open_interest: int = Field(ge=0)
+    volume: int | None = Field(default=None, ge=0)
+    open_interest: int | None = Field(default=None, ge=0)
+    bid_size: int | None = Field(default=None, ge=0)
+    ask_size: int | None = Field(default=None, ge=0)
     implied_volatility: Decimal = Field(ge=0)
     delta: Decimal | None = None
     observed_at: datetime
@@ -87,8 +89,10 @@ class OptionLeg(StrictModel):
     ratio_qty: int = Field(default=1, ge=1, le=4)
     bid: Decimal = Field(ge=0)
     ask: Decimal = Field(ge=0)
-    volume: int = Field(ge=0)
-    open_interest: int = Field(ge=0)
+    volume: int | None = Field(default=None, ge=0)
+    open_interest: int | None = Field(default=None, ge=0)
+    bid_size: int | None = Field(default=None, ge=0)
+    ask_size: int | None = Field(default=None, ge=0)
 
     @property
     def midpoint(self) -> Decimal:

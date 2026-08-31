@@ -101,7 +101,7 @@ def _build_condor(
         return None
     complete = tuple(quote for quote in selected if quote is not None)
     if not _liquid(complete):
-        reasons.append("volume, open interest, or quote liquidity gate failed")
+        reasons.append("fresh quote, daily volume, or available depth liquidity gate failed")
         return None
     legs = (
         _leg(complete[0], Side.BUY),
@@ -267,13 +267,23 @@ def _nearest_exact_side(
 
 
 def _liquid(quotes: tuple[OptionQuote, ...]) -> bool:
-    return all(
-        quote.bid > 0
-        and quote.ask > quote.bid
-        and quote.volume >= MIN_VOLUME
-        and quote.open_interest >= MIN_OPEN_INTEREST
-        for quote in quotes
-    )
+    return all(_quote_is_liquid(quote) for quote in quotes)
+
+
+def _quote_is_liquid(quote: OptionQuote) -> bool:
+    if quote.bid <= 0 or quote.ask <= quote.bid:
+        return False
+    if quote.volume is None or quote.volume < MIN_VOLUME:
+        return False
+    # Alpaca's option snapshot has no open-interest field. When another normalized
+    # source supplies OI, keep the existing conservative floor; absence is not zero.
+    if quote.open_interest is not None and quote.open_interest < MIN_OPEN_INTEREST:
+        return False
+    # Alpaca quote depth is useful corroboration when present, but older normalized
+    # fixtures and sources may omit it. A supplied empty side is never considered liquid.
+    if quote.bid_size is not None and quote.bid_size <= 0:
+        return False
+    return quote.ask_size is None or quote.ask_size > 0
 
 
 def _leg(quote: OptionQuote, side: Side) -> OptionLeg:
@@ -291,6 +301,8 @@ def _leg(quote: OptionQuote, side: Side) -> OptionLeg:
         ask=quote.ask,
         volume=quote.volume,
         open_interest=quote.open_interest,
+        bid_size=quote.bid_size,
+        ask_size=quote.ask_size,
     )
 
 
