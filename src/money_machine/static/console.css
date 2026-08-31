@@ -26,6 +26,11 @@
 .activity-entry.danger .activity-status{color:var(--red);border-color:rgba(255,123,102,.3)}
 .ops-chart-panel{min-height:390px;display:flex;flex-direction:column;padding:28px 30px 24px}
 .ops-chart-panel .equity-value{font-size:clamp(38px,4vw,54px)}
+.equity-source-state{display:inline-flex;align-items:center;gap:5px;margin-left:8px;color:var(--muted);font-size:8px;letter-spacing:.08em;white-space:nowrap}
+.equity-source-state::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor}
+.equity-source-state[data-state="live"]{color:var(--acid)}
+.equity-source-state[data-state="stale"]{color:#d5b36c}
+.equity-delta strong{color:inherit}
 .ops-equity-chart{height:205px;flex:1;min-height:180px}
 .ops-metrics{margin-top:18px}
 .performance-overview{padding-bottom:24px}
