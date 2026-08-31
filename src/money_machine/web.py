@@ -1,31 +1,40 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import structlog
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from money_machine.adapters.alpaca_mcp import AlpacaMcpV2Adapter
 from money_machine.adapters.replay import ReplayAlpacaAdapter
-from money_machine.domain.clock import ENDS_AT
+from money_machine.domain.clock import BASELINE_EQUITY, ENDS_AT
 from money_machine.domain.enums import RunMode
 from money_machine.model_provider import ReplayModelProvider
 from money_machine.persistence.database import Database
 from money_machine.persistence.repository import AuditRepository
+from money_machine.ports import BrokeragePort
 from money_machine.safety import configured_account_fingerprint
 from money_machine.service import AgentService
 from money_machine.settings import Settings
 
 PACKAGE_DIR = Path(__file__).parent
+ACCOUNT_CACHE_SECONDS = 10
+ACCOUNT_READ_TIMEOUT_SECONDS = 12
+logger = structlog.get_logger()
 
 
 def create_app(settings: Settings | None = None, database: Database | None = None) -> FastAPI:
     app_settings = settings or Settings()
     db = database or Database(app_settings.database_url)
     repository = AuditRepository(db)
+    account_lock = asyncio.Lock()
+    account_cache: tuple[datetime, dict[str, Any]] | None = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -143,6 +152,45 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
             raise HTTPException(status_code=404, detail="Final EOD performance is not available")
         return JSONResponse(summary)
 
+    @app.get("/api/account")
+    async def broker_account() -> JSONResponse:
+        nonlocal account_cache
+        requested_at = datetime.now(UTC)
+        if account_cache is not None:
+            cached_at, cached_payload = account_cache
+            if requested_at - cached_at < timedelta(seconds=ACCOUNT_CACHE_SECONDS):
+                return _no_store_response(cached_payload)
+        async with account_lock:
+            requested_at = datetime.now(UTC)
+            if account_cache is not None:
+                cached_at, cached_payload = account_cache
+                if requested_at - cached_at < timedelta(seconds=ACCOUNT_CACHE_SECONDS):
+                    return _no_store_response(cached_payload)
+            try:
+                async with asyncio.timeout(ACCOUNT_READ_TIMEOUT_SECONDS):
+                    payload = await _broker_account_payload(app_settings)
+            except Exception as exc:
+                logger.warning("broker_account_endpoint_degraded", error=type(exc).__name__)
+                return _no_store_response(
+                    {
+                        "status": "degraded",
+                        "equity": None,
+                        "pnl": None,
+                        "observed_at": requested_at.isoformat(),
+                        "cash": None,
+                        "buying_power": None,
+                        "portfolio_value": None,
+                        "realized_pl": None,
+                        "unrealized_pl": None,
+                        "open_position_count": None,
+                        "working_order_count": None,
+                        "broker_confirmed_flat": None,
+                    },
+                    status_code=503,
+                )
+            account_cache = (requested_at, payload)
+            return _no_store_response(payload)
+
     @app.get("/api/health")
     async def health() -> JSONResponse:
         state = repository.latest_operational_state()
@@ -226,3 +274,41 @@ def _aware(value: Any) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+async def _broker_account_payload(settings: Settings) -> dict[str, Any]:
+    if settings.run_mode is RunMode.REPLAY:
+        return await _read_broker_account(ReplayAlpacaAdapter())
+    async with AlpacaMcpV2Adapter(settings) as adapter:
+        return await _read_broker_account(adapter)
+
+
+async def _read_broker_account(adapter: BrokeragePort) -> dict[str, Any]:
+    account, positions, orders = await asyncio.gather(
+        adapter.account(),
+        adapter.positions(),
+        adapter.orders(status="open"),
+    )
+    observed_at = datetime.now(UTC)
+    return {
+        "status": "ok",
+        "equity": str(account.equity),
+        "pnl": str(account.equity - BASELINE_EQUITY),
+        "observed_at": observed_at.isoformat(),
+        "cash": str(account.cash),
+        "buying_power": str(account.buying_power),
+        "portfolio_value": str(account.portfolio_value),
+        "realized_pl": str(account.realized_pl),
+        "unrealized_pl": str(account.unrealized_pl),
+        "open_position_count": len(positions),
+        "working_order_count": len(orders),
+        "broker_confirmed_flat": not positions and not orders,
+    }
+
+
+def _no_store_response(payload: dict[str, Any], *, status_code: int = 200) -> JSONResponse:
+    return JSONResponse(
+        payload,
+        status_code=status_code,
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
