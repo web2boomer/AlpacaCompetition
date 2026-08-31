@@ -53,6 +53,8 @@ Open <http://127.0.0.1:8000>. Replay mode requires no API keys and seeds the can
 Keep the two account configurations in separate ignored files. Use
 `.env.development.local` with the development role and development credentials; reserve
 `.env.competition.local` for the production role and the fresh competition credentials.
+The immutable role-to-account mapping is documented in
+[Competition accounts](docs/COMPETITION_ACCOUNTS.md).
 Fill the three Alpaca credential/identity fields and restrict both files:
 
 ```bash
