@@ -496,6 +496,15 @@ class AuditRepository:
                 or fallback_equity
             )
             open_statuses = (
+                "accepted",
+                "accepted_for_bidding",
+                "calculated",
+                "held",
+                "pending_new",
+                "pending_cancel",
+                "pending_replace",
+                "new",
+                "stopped",
                 "submitted",
                 "partially_filled",
                 "partially_filled_canceled",
@@ -532,7 +541,24 @@ class AuditRepository:
                             BrokerOrderORM.agent_run_id == CandidateORM.agent_run_id,
                         ),
                     )
-                    .where(BrokerOrderORM.status.in_(["proposed", "submitted", "partially_filled"]))
+                    .where(
+                        BrokerOrderORM.status.in_(
+                            [
+                                "proposed",
+                                "accepted",
+                                "accepted_for_bidding",
+                                "calculated",
+                                "held",
+                                "pending_new",
+                                "pending_cancel",
+                                "pending_replace",
+                                "new",
+                                "stopped",
+                                "submitted",
+                                "partially_filled",
+                            ]
+                        )
+                    )
                 )
             )
             return {

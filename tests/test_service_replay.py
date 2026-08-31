@@ -113,6 +113,44 @@ async def test_duplicate_cycle_and_order_are_suppressed(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "broker_status",
+    [
+        "accepted",
+        "accepted_for_bidding",
+        "calculated",
+        "held",
+        "pending_new",
+        "pending_cancel",
+        "pending_replace",
+        "new",
+        "stopped",
+    ],
+)
+async def test_broker_pending_statuses_reserve_risk_and_underlying(
+    settings, repository, replay_adapter, broker_status
+) -> None:
+    outcome = await AgentService(settings, repository).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at,
+        mode=RunMode.REPLAY,
+    )
+    with repository.database.session() as session:
+        order = session.scalar(
+            select(BrokerOrderORM).where(BrokerOrderORM.agent_run_id == outcome.run_id)
+        )
+        assert order is not None
+        order.status = broker_status
+
+    summary = repository.portfolio_risk_summary(Decimal("100000"))
+
+    assert summary["open_alpha_structures"] == 1
+    assert summary["total_open_defined_loss"] == Decimal(outcome.passport["risk"]["awarded_risk"])
+    assert summary["pending_underlyings"] == frozenset({"QQQ"})
+
+
+@pytest.mark.asyncio
 async def test_kill_switch_blocks_entry(settings, repository, replay_adapter) -> None:
     repository.set_kill_switch(active=True, now=replay_adapter.observed_at)
     outcome = await AgentService(settings, repository).run_cycle(
