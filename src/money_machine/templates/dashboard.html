@@ -19,9 +19,11 @@
       <small>Competition finish</small>
       <strong id="competition-countdown" data-ends-at="{{ competition_ends_at }}" aria-live="off">Calculating…</strong>
     </span>
-    <span class="live-indicator" aria-live="polite"><i></i><strong id="connection-state">Live</strong></span>
-    <span>Updates every 15 seconds</span>
-    <span>Last update <time id="last-updated" datetime="{{ refreshed_at }}">{{ refreshed_at }}</time></span>
+    <span class="refresh-meta">
+      <span class="live-indicator" aria-live="polite"><i></i><strong id="connection-state">Live</strong></span>
+      <span>Updates every 15 seconds</span>
+      <span>Last update <time id="last-updated" datetime="{{ refreshed_at }}">{{ refreshed_at }}</time></span>
+    </span>
   </div>
 </section>
 

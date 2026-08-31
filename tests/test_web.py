@@ -28,6 +28,7 @@ def test_dashboard_and_health(settings, database) -> None:
     assert "Status and timestamps refresh with the console every 15 seconds" in response.text
     assert "Last update" in response.text
     assert "Competition finish" in response.text
+    assert 'class="refresh-meta"' in response.text
     assert 'data-ends-at="2026-09-04T13:30:00+00:00"' in response.text
     assert "window.setInterval(renderCountdown, 1000)" in response.text
     assert "Official competition performance" in response.text
