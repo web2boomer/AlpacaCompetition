@@ -371,6 +371,14 @@ class AgentService:
         events: list[dict[str, Any]] = []
         incidents: list[str] = []
         active_closing_candidates: set[str] = set()
+        for candidate_id in self.repository.reconcile_filled_closing_parents(now=now):
+            events.append(
+                {
+                    "event": "closing_parent_terminal_reconciled",
+                    "candidate_id": candidate_id,
+                    "status": "closed",
+                }
+            )
         if clock.flat_target_reached and (positions or self.repository.pending_managed_orders()):
             incidents.append("flat_target_exposure_remaining")
         for order in self.repository.pending_managed_orders():
