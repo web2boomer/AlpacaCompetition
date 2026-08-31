@@ -277,11 +277,13 @@ Required gates:
 
 ### 9.2 Directional debit spread
 
-Universe: SPY and QQQ initially; IWM only after observed fill quality passes.
+Universe: SPY, QQQ, and IWM.
 
 Intent: express a high-confidence directional regime without selling neutral volatility into a trend.
 
-Structure: call debit spread for bullish regimes, put debit spread for bearish regimes.
+Structure: call debit spread for bullish regimes, put debit spread for bearish regimes. The
+compiler requires an exact $5 protective short-wing distance for every directional underlying,
+so strike geometry and deterministic maximum-loss accounting cannot diverge.
 
 Required gates:
 

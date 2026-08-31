@@ -24,6 +24,8 @@ MAX_STRUCTURE_SPREAD_TO_EDGE = Decimal("0.45")
 MIN_CREDIT = Decimal("0.20")
 DIRECTIONAL_TREND_THRESHOLD = Decimal("0.004")
 DIRECTIONAL_MIN_CONFIDENCE = Decimal("0.72")
+DIRECTIONAL_SPREAD_WIDTH = Decimal("5")
+DIRECTIONAL_UNDERLYINGS = frozenset({"SPY", "QQQ", "IWM"})
 CENT = Decimal("0.01")
 
 
@@ -50,7 +52,7 @@ def build_candidates(
         condor = _build_condor(snapshot, chain, now, reasons)
         if condor:
             symbol_candidates.append(condor)
-        if snapshot.symbol in {"SPY", "QQQ"}:
+        if snapshot.symbol in DIRECTIONAL_UNDERLYINGS:
             directional = _build_directional(snapshot, chain, now, reasons)
             if directional:
                 symbol_candidates.append(directional)
@@ -177,14 +179,17 @@ def _build_directional(
     bullish = snapshot.trend_return_pct > 0
     right = OptionRight.CALL if bullish else OptionRight.PUT
     action = Action.CALL_DEBIT_SPREAD if bullish else Action.PUT_DEBIT_SPREAD
-    width = Decimal("5")
+    width = DIRECTIONAL_SPREAD_WIDTH
     long_quote = _nearest(quotes, right, snapshot.spot)
     if long_quote is None:
         reasons.append("missing near-the-money directional long leg")
         return None
     short_target = long_quote.strike + width if bullish else long_quote.strike - width
-    short_quote = _nearest_exact_side(quotes, right, short_target, lower=not bullish)
-    if short_quote is None or not _liquid((long_quote, short_quote)):
+    short_quote = _exact_strike(quotes, right, short_target)
+    if short_quote is None:
+        reasons.append("missing directional short wing at configured width")
+        return None
+    if not _liquid((long_quote, short_quote)):
         reasons.append("directional spread liquidity gate failed")
         return None
     legs = (_leg(long_quote, Side.BUY), _leg(short_quote, Side.SELL))
@@ -265,6 +270,15 @@ def _nearest_exact_side(
         if quote.right is right and (quote.strike <= target if lower else quote.strike >= target)
     ]
     return min(matches, key=lambda quote: abs(quote.strike - target)) if matches else None
+
+
+def _exact_strike(
+    quotes: list[OptionQuote], right: OptionRight, target: Decimal
+) -> OptionQuote | None:
+    return next(
+        (quote for quote in quotes if quote.right is right and quote.strike == target),
+        None,
+    )
 
 
 def _liquid(quotes: tuple[OptionQuote, ...]) -> bool:
