@@ -328,6 +328,13 @@ Competition limits:
 - Daily realized plus unrealized loss stop: 2.00% of start-of-day equity.
 - Competition peak-to-trough drawdown stop: 4.00%.
 - Maximum three open alpha structures.
+- Temporary legacy-stack accommodation: while reconciliation identifies four or five open
+  alpha structures all on QQQ, with no pending entry, one SPY or IWM index structure may
+  pass the count gate at the ordinary 0.75% tier only. The accommodation never permits a
+  new QQQ structure, high-conviction sizing, pyramiding, or a second distinct-underlying
+  entry. It disables itself as soon as a distinct-underlying order is pending or established,
+  and the normal maximum-three rule applies automatically once the legacy QQQ count is
+  three or fewer.
 - Maximum one pending entry per underlying.
 - No pyramiding, adding to, or resizing an existing managed structure.
 - No naked legs.

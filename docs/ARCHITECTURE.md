@@ -47,6 +47,11 @@ deterministic trend strength, at least 2.00 reward/risk, and debit no greater th
 of spread width so expensive premium alone cannot trigger the larger tier. Earnings stays
 at 0.35%. The shared SPY/QQQ/IWM cap is 4.00%, total concurrent defined loss is capped at
 5.00%, daily loss at 2.00%, and peak drawdown at 4.00%. At most three
-alpha structures may be open, with no pending duplicate or addition to an existing
-managed underlying. Quantity is always floored from the smallest remaining applicable
-budget, and the effective tier and budget are recorded in the Decision Passport.
+alpha structures may normally be open, with no pending duplicate or addition to an existing
+managed underlying. A narrow legacy-stack accommodation permits one ordinary-tier SPY or
+IWM index structure only while four or five reconciled open structures are all QQQ and no
+entry is pending. It cannot add QQQ exposure, cannot use the high-conviction tier, and
+disables itself after the first distinct-underlying order or when the QQQ legacy count is
+three or fewer. Quantity is always floored from the smallest remaining applicable budget,
+and the effective tier, legacy-exception evidence, and budget are recorded in the Decision
+Passport.

@@ -24,8 +24,10 @@ TOTAL_DEFINED_LOSS_PCT = Decimal("0.05")
 DAILY_LOSS_PCT = Decimal("0.02")
 COMPETITION_DRAWDOWN_PCT = Decimal("0.04")
 MAX_OPEN_ALPHA_STRUCTURES = 3
+LEGACY_QQQ_MAX_STRUCTURES = 5
 MAX_DATA_AGE_SECONDS = 90
 INDEX_UNDERLYINGS = frozenset({"SPY", "QQQ", "IWM"})
+LEGACY_QQQ_DISTINCT_UNDERLYINGS = INDEX_UNDERLYINGS - {"QQQ"}
 INDEX_ACTIONS = frozenset({Action.INDEX_CONDOR, Action.CALL_DEBIT_SPREAD, Action.PUT_DEBIT_SPREAD})
 DIRECTIONAL_INDEX_ACTIONS = frozenset({Action.CALL_DEBIT_SPREAD, Action.PUT_DEBIT_SPREAD})
 
@@ -143,11 +145,42 @@ def evaluate_risk(
         drawdown_limit,
         RiskReason.DRAWDOWN,
     )
+    legacy_qqq_exception_applied = _legacy_qqq_diversification_exception(
+        candidate=candidate,
+        context=context,
+    )
+    normal_structure_count_passed = context.open_alpha_structures < MAX_OPEN_ALPHA_STRUCTURES
     add(
         "open_structure_count",
-        context.open_alpha_structures < MAX_OPEN_ALPHA_STRUCTURES,
-        context.open_alpha_structures,
-        MAX_OPEN_ALPHA_STRUCTURES,
+        normal_structure_count_passed or legacy_qqq_exception_applied,
+        (
+            f"{context.open_alpha_structures}; "
+            f"legacy_qqq_exception={str(legacy_qqq_exception_applied).lower()}"
+        ),
+        (
+            f"normal_open_structures<{MAX_OPEN_ALPHA_STRUCTURES}; legacy exception requires "
+            f"{MAX_OPEN_ALPHA_STRUCTURES + 1}-{LEGACY_QQQ_MAX_STRUCTURES} QQQ-only "
+            "structures and one ordinary-tier SPY/IWM candidate"
+        ),
+        RiskReason.OPEN_STRUCTURE_LIMIT,
+    )
+    add(
+        "legacy_qqq_diversification_exception",
+        True,
+        (
+            f"applied={str(legacy_qqq_exception_applied).lower()}; "
+            f"open_alpha_structures={context.open_alpha_structures}; "
+            f"open_underlyings={','.join(sorted(context.open_underlyings)) or 'none'}; "
+            f"pending_underlyings={','.join(sorted(context.pending_underlyings)) or 'none'}; "
+            f"candidate_underlying={candidate.structure.underlying}; "
+            f"candidate_action={candidate.action.value}; "
+            "effective_tier=standard_index_only"
+        ),
+        (
+            f"{MAX_OPEN_ALPHA_STRUCTURES + 1}-{LEGACY_QQQ_MAX_STRUCTURES} established "
+            "QQQ-only structures; no pending entry; candidate is SPY/IWM index strategy; "
+            "at most one distinct-underlying accommodation; auto-disabled at <=3"
+        ),
         RiskReason.OPEN_STRUCTURE_LIMIT,
     )
     add(
@@ -211,7 +244,9 @@ def evaluate_risk(
     )
     tier_thresholds_met = condor_tier_thresholds_met or directional_tier_thresholds_met
     hard_gates_passed = all(check.passed for check in checks)
-    high_conviction_applied = tier_thresholds_met and hard_gates_passed
+    high_conviction_applied = (
+        tier_thresholds_met and hard_gates_passed and not legacy_qqq_exception_applied
+    )
     qualification_path = (
         "condor"
         if candidate.action is Action.INDEX_CONDOR
@@ -226,6 +261,7 @@ def evaluate_risk(
         reward_risk_ratio=reward_risk_ratio,
         debit_to_width_ratio=debit_to_width_ratio,
         hard_gate_failures=tuple(check.name for check in checks if not check.passed),
+        legacy_qqq_exception_applied=legacy_qqq_exception_applied,
     )
     if candidate.action is Action.EARNINGS_CONDOR:
         per_pct = EARNINGS_PER_STRUCTURE_PCT
@@ -340,6 +376,20 @@ def _spread_width(candidate: Candidate) -> Decimal:
     return strikes[1] - strikes[0]
 
 
+def _legacy_qqq_diversification_exception(
+    *,
+    candidate: Candidate,
+    context: RiskContext,
+) -> bool:
+    return (
+        MAX_OPEN_ALPHA_STRUCTURES < context.open_alpha_structures <= LEGACY_QQQ_MAX_STRUCTURES
+        and context.open_underlyings == frozenset({"QQQ"})
+        and not context.pending_underlyings
+        and candidate.action in INDEX_ACTIONS
+        and candidate.structure.underlying in LEGACY_QQQ_DISTINCT_UNDERLYINGS
+    )
+
+
 def _high_conviction_failures(
     *,
     candidate: Candidate,
@@ -348,6 +398,7 @@ def _high_conviction_failures(
     reward_risk_ratio: Decimal,
     debit_to_width_ratio: Decimal | None,
     hard_gate_failures: tuple[str, ...],
+    legacy_qqq_exception_applied: bool,
 ) -> tuple[str, ...]:
     failures: list[str] = []
     if not index_strategy:
@@ -374,4 +425,6 @@ def _high_conviction_failures(
             failures.append("directional_debit_to_width_above_threshold")
     for name in hard_gate_failures:
         failures.append(f"hard_gate_failed:{name}")
+    if legacy_qqq_exception_applied:
+        failures.append("legacy_qqq_exception_standard_only")
     return tuple(failures)

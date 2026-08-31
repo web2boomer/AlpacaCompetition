@@ -22,6 +22,7 @@ from money_machine.domain.risk import (
     HIGH_CONVICTION_MIN_RICHNESS_RATIO,
     INDEX_CLUSTER_PCT,
     INDEX_PER_STRUCTURE_PCT,
+    LEGACY_QQQ_MAX_STRUCTURES,
     MAX_OPEN_ALPHA_STRUCTURES,
     TOTAL_DEFINED_LOSS_PCT,
     evaluate_risk,
@@ -67,6 +68,29 @@ def candidate_with(replay_candidate, **updates):
     action = updates.pop("action", replay_candidate.action)
     structure = replay_candidate.structure.model_copy(update={"strategy": action})
     return replay_candidate.model_copy(update={"action": action, "structure": structure, **updates})
+
+
+def candidate_for_underlying(replay_candidate, underlying: str, **updates):
+    original = replay_candidate.structure.underlying
+    legs = tuple(
+        leg.model_copy(
+            update={
+                "underlying": underlying,
+                "symbol": leg.symbol.replace(original, underlying, 1),
+            }
+        )
+        for leg in replay_candidate.structure.legs
+    )
+    structure = replay_candidate.structure.model_copy(
+        update={"underlying": underlying, "legs": legs}
+    )
+    return replay_candidate.model_copy(
+        update={
+            "candidate_id": f"{underlying.lower()}-legacy-diversification",
+            "structure": structure,
+            **updates,
+        }
+    )
 
 
 def directional_candidate(
@@ -313,6 +337,7 @@ def test_competition_risk_policy_constants_are_fixed() -> None:
     assert Decimal("0.04") == INDEX_CLUSTER_PCT
     assert Decimal("0.05") == TOTAL_DEFINED_LOSS_PCT
     assert MAX_OPEN_ALPHA_STRUCTURES == 3
+    assert LEGACY_QQQ_MAX_STRUCTURES == 5
     assert Decimal("0.02") == DAILY_LOSS_PCT
     assert Decimal("0.04") == COMPETITION_DRAWDOWN_PCT
 
@@ -385,13 +410,151 @@ async def test_five_open_structures_reject_before_high_conviction_sizing(
     assert not result.approved
     assert result.quantity == 0
     assert RiskReason.OPEN_STRUCTURE_LIMIT in result.reason_codes
-    assert check(result, "open_structure_count").actual == "5"
-    assert check(result, "open_structure_count").limit == "3"
+    assert check(result, "open_structure_count").actual == "5; legacy_qqq_exception=false"
+    assert "normal_open_structures<3" in check(result, "open_structure_count").limit
     assert "applied=false" in check(result, "high_conviction_index_tier").actual
     assert RiskReason.EXISTING_STRUCTURE in result.reason_codes
     assert check(result, "effective_per_structure_percent").actual == "0.0075"
     assert check(result, "cluster_defined_loss_headroom").actual == "2021.00"
     assert check(result, "total_defined_loss_headroom").actual == "3021.00"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("open_count", "underlying"), [(4, "SPY"), (5, "IWM")])
+async def test_legacy_qqq_stack_allows_one_distinct_underlying_at_standard_tier_only(
+    replay_candidate,
+    open_count,
+    underlying,
+) -> None:
+    candidate = candidate_for_underlying(
+        replay_candidate,
+        underlying,
+        richness_ratio=Decimal("2.00"),
+    )
+
+    result = evaluate_risk(
+        decision(candidate, confidence=0.99),
+        candidate,
+        context(
+            open_alpha_structures=open_count,
+            open_underlyings=frozenset({"QQQ"}),
+            index_cluster_defined_loss=Decimal("1979"),
+            total_open_defined_loss=Decimal("1979"),
+        ),
+    )
+
+    assert result.approved
+    assert result.quantity == 1
+    assert result.awarded_risk == Decimal("400")
+    exception = check(result, "legacy_qqq_diversification_exception")
+    assert "applied=true" in exception.actual
+    assert f"candidate_underlying={underlying}" in exception.actual
+    assert "effective_tier=standard_index_only" in exception.actual
+    assert "legacy_qqq_exception=true" in check(result, "open_structure_count").actual
+    tier = check(result, "high_conviction_index_tier")
+    assert "applied=false" in tier.actual
+    assert "legacy_qqq_exception_standard_only" in tier.actual
+    assert check(result, "effective_per_structure_percent").actual == "0.0075"
+    assert check(result, "effective_per_structure_budget").actual == "750.0000"
+
+
+@pytest.mark.asyncio
+async def test_live_style_spy_debit_spread_sizes_to_six_under_legacy_exception(
+    replay_candidate,
+) -> None:
+    candidate = candidate_for_underlying(
+        directional_candidate(
+            replay_candidate,
+            trend_strength=Decimal("0.0051"),
+            debit=Decimal("1.20"),
+            maximum_profit=Decimal("380.00"),
+        ),
+        "SPY",
+    )
+
+    result = evaluate_risk(
+        decision(candidate, confidence=0.78),
+        candidate,
+        context(
+            open_alpha_structures=5,
+            open_underlyings=frozenset({"QQQ"}),
+            index_cluster_defined_loss=Decimal("1979"),
+            total_open_defined_loss=Decimal("1979"),
+        ),
+    )
+
+    assert result.approved
+    assert result.quantity == 6
+    assert result.awarded_risk == Decimal("720.00")
+    assert check(result, "effective_per_structure_percent").actual == "0.0075"
+    assert check(result, "effective_per_structure_budget").actual == "750.0000"
+    assert "applied=true" in check(result, "legacy_qqq_diversification_exception").actual
+    assert "applied=false" in check(result, "high_conviction_index_tier").actual
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("open_count", "open_underlyings", "pending_underlyings", "underlying", "action"),
+    [
+        (5, frozenset({"QQQ"}), frozenset(), "QQQ", Action.INDEX_CONDOR),
+        (5, frozenset({"QQQ", "SPY"}), frozenset(), "IWM", Action.INDEX_CONDOR),
+        (5, frozenset({"QQQ"}), frozenset({"SPY"}), "IWM", Action.INDEX_CONDOR),
+        (6, frozenset({"QQQ"}), frozenset(), "SPY", Action.INDEX_CONDOR),
+        (3, frozenset({"QQQ"}), frozenset(), "SPY", Action.INDEX_CONDOR),
+        (5, frozenset({"QQQ"}), frozenset(), "SPY", Action.EARNINGS_CONDOR),
+    ],
+)
+async def test_legacy_qqq_exception_fails_closed_outside_exact_scope(
+    replay_candidate,
+    open_count,
+    open_underlyings,
+    pending_underlyings,
+    underlying,
+    action,
+) -> None:
+    candidate = candidate_for_underlying(replay_candidate, underlying)
+    if action is not candidate.action:
+        candidate = candidate_with(candidate, action=action)
+
+    result = evaluate_risk(
+        decision(candidate, confidence=0.99),
+        candidate,
+        context(
+            open_alpha_structures=open_count,
+            open_underlyings=open_underlyings,
+            pending_underlyings=pending_underlyings,
+            index_cluster_defined_loss=Decimal("1979"),
+            total_open_defined_loss=Decimal("1979"),
+        ),
+    )
+
+    assert not result.approved
+    assert result.quantity == 0
+    assert RiskReason.OPEN_STRUCTURE_LIMIT in result.reason_codes
+    assert "applied=false" in check(result, "legacy_qqq_diversification_exception").actual
+
+
+@pytest.mark.asyncio
+async def test_legacy_qqq_exception_cannot_bypass_cluster_or_total_headroom(
+    replay_candidate,
+) -> None:
+    candidate = candidate_for_underlying(replay_candidate, "SPY")
+
+    result = evaluate_risk(
+        decision(candidate),
+        candidate,
+        context(
+            open_alpha_structures=5,
+            open_underlyings=frozenset({"QQQ"}),
+            index_cluster_defined_loss=Decimal("3990"),
+            total_open_defined_loss=Decimal("4990"),
+        ),
+    )
+
+    assert not result.approved
+    assert result.quantity == 0
+    assert RiskReason.ZERO_QUANTITY in result.reason_codes
+    assert "applied=true" in check(result, "legacy_qqq_diversification_exception").actual
 
 
 @pytest.mark.asyncio
