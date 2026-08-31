@@ -575,6 +575,28 @@ class AuditRepository:
                     )
                 )
             )
+            open_underlyings = set(
+                session.scalars(
+                    select(CandidateORM.symbol)
+                    .join(
+                        BrokerOrderORM,
+                        and_(
+                            BrokerOrderORM.candidate_id == CandidateORM.candidate_id,
+                            BrokerOrderORM.agent_run_id == CandidateORM.agent_run_id,
+                        ),
+                    )
+                    .where(
+                        BrokerOrderORM.status.in_(
+                            [
+                                "partially_filled",
+                                "partially_filled_canceled",
+                                "filled",
+                                "closing",
+                            ]
+                        )
+                    )
+                )
+            )
             return {
                 "peak_equity": Decimal(str(peak)),
                 "start_of_day_equity": Decimal(str(latest_today)),
@@ -582,6 +604,7 @@ class AuditRepository:
                 "index_cluster_defined_loss": Decimal(str(open_loss)),
                 "open_alpha_structures": int(open_count),
                 "pending_underlyings": frozenset(pending),
+                "open_underlyings": frozenset(open_underlyings),
             }
 
     def latest_official_equity_at_or_before(

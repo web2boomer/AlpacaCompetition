@@ -80,6 +80,12 @@ async def test_replay_end_to_end_generates_decision_passport(
     assert outcome.order_submitted
     assert outcome.passport["result_label"] == "REPLAY — NOT OFFICIAL P&L"
     assert outcome.passport["risk"]["approved"]
+    checks = {item["name"]: item for item in outcome.passport["risk"]["checks"]}
+    assert "applied=true" in checks["high_conviction_index_tier"]["actual"]
+    assert checks["effective_per_structure_percent"]["actual"] == "0.01"
+    assert Decimal(checks["effective_per_structure_budget"]["actual"]) == (
+        Decimal(outcome.passport["account"]["equity"]) * Decimal("0.01")
+    )
     assert outcome.passport["execution"]["order_type"] == "limit"
     assert outcome.passport["counterfactuals"]["label"].startswith("HYPOTHETICAL")
     assert len(outcome.passport["audit_hash"]) == 64
@@ -148,6 +154,7 @@ async def test_broker_pending_statuses_reserve_risk_and_underlying(
     assert summary["open_alpha_structures"] == 1
     assert summary["total_open_defined_loss"] == Decimal(outcome.passport["risk"]["awarded_risk"])
     assert summary["pending_underlyings"] == frozenset({"QQQ"})
+    assert summary["open_underlyings"] == frozenset()
 
 
 @pytest.mark.asyncio
@@ -174,7 +181,11 @@ async def test_complete_broker_positions_normalize_pending_parent_to_filled(
     positions = [
         {
             "symbol": leg["symbol"],
-            "qty": str(leg["ratio_qty"] if leg["side"] == "buy" else -leg["ratio_qty"]),
+            "qty": str(
+                leg["ratio_qty"] * outcome.passport["risk"]["quantity"]
+                if leg["side"] == "buy"
+                else -leg["ratio_qty"] * outcome.passport["risk"]["quantity"]
+            ),
         }
         for leg in selected["structure"]["legs"]
     ]
@@ -186,6 +197,8 @@ async def test_complete_broker_positions_normalize_pending_parent_to_filled(
     managed = repository.open_managed_structures()
     assert len(managed) == 1
     assert managed[0].status == "filled"
+    summary = repository.portfolio_risk_summary(Decimal("100000"))
+    assert summary["open_underlyings"] == frozenset({"QQQ"})
 
 
 @pytest.mark.asyncio

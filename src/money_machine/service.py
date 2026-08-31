@@ -207,6 +207,7 @@ class AgentService:
                 index_cluster_defined_loss=risk_summary["index_cluster_defined_loss"],
                 open_alpha_structures=risk_summary["open_alpha_structures"],
                 pending_underlyings=risk_summary["pending_underlyings"],
+                open_underlyings=risk_summary["open_underlyings"],
                 kill_switch_active=bool(operational.get("kill_switch_active", False)),
                 reconciliation_clean=reconciliation_clean,
             )

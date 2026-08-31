@@ -11,13 +11,18 @@ from money_machine.domain.schemas import (
 )
 
 INDEX_PER_STRUCTURE_PCT = Decimal("0.005")
+HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT = Decimal("0.01")
 EARNINGS_PER_STRUCTURE_PCT = Decimal("0.0035")
-INDEX_CLUSTER_PCT = Decimal("0.01")
-TOTAL_DEFINED_LOSS_PCT = Decimal("0.02")
+HIGH_CONVICTION_MIN_CONFIDENCE = Decimal("0.80")
+HIGH_CONVICTION_MIN_RICHNESS_RATIO = Decimal("1.50")
+INDEX_CLUSTER_PCT = Decimal("0.02")
+TOTAL_DEFINED_LOSS_PCT = Decimal("0.03")
 DAILY_LOSS_PCT = Decimal("0.01")
 COMPETITION_DRAWDOWN_PCT = Decimal("0.02")
 MAX_OPEN_ALPHA_STRUCTURES = 3
 MAX_DATA_AGE_SECONDS = 90
+INDEX_UNDERLYINGS = frozenset({"SPY", "QQQ", "IWM"})
+INDEX_ACTIONS = frozenset({Action.INDEX_CONDOR, Action.CALL_DEBIT_SPREAD, Action.PUT_DEBIT_SPREAD})
 
 
 def evaluate_risk(
@@ -147,18 +152,75 @@ def evaluate_risk(
         False,
         RiskReason.PENDING_UNDERLYING,
     )
-    if any(not check.passed for check in checks):
+    add(
+        "existing_managed_structure",
+        candidate.structure.underlying not in context.open_underlyings,
+        candidate.structure.underlying in context.open_underlyings,
+        False,
+        RiskReason.EXISTING_STRUCTURE,
+    )
+
+    index_strategy = (
+        candidate.action in INDEX_ACTIONS and candidate.structure.underlying in INDEX_UNDERLYINGS
+    )
+    confidence = Decimal(str(decision.confidence))
+    tier_thresholds_met = (
+        index_strategy
+        and confidence >= HIGH_CONVICTION_MIN_CONFIDENCE
+        and candidate.richness_ratio >= HIGH_CONVICTION_MIN_RICHNESS_RATIO
+    )
+    hard_gates_passed = all(check.passed for check in checks)
+    high_conviction_applied = tier_thresholds_met and hard_gates_passed
+    if candidate.action is Action.EARNINGS_CONDOR:
+        per_pct = EARNINGS_PER_STRUCTURE_PCT
+        tier_name = "earnings"
+    elif high_conviction_applied:
+        per_pct = HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT
+        tier_name = "high_conviction_index"
+    else:
+        per_pct = INDEX_PER_STRUCTURE_PCT
+        tier_name = "standard_index"
+    per_budget = context.equity * per_pct
+    add(
+        "high_conviction_index_tier",
+        True,
+        (
+            f"applied={str(high_conviction_applied).lower()}; tier={tier_name}; "
+            f"confidence={confidence}; richness_ratio={candidate.richness_ratio}; "
+            f"index_strategy={str(index_strategy).lower()}; "
+            f"hard_gates_passed={str(hard_gates_passed).lower()}"
+        ),
+        (
+            f"confidence>={HIGH_CONVICTION_MIN_CONFIDENCE}; "
+            f"richness_ratio>={HIGH_CONVICTION_MIN_RICHNESS_RATIO}; "
+            "index_strategy=true; hard_gates_passed=true"
+        ),
+        RiskReason.PER_STRUCTURE_CAP,
+    )
+    add(
+        "effective_per_structure_percent",
+        True,
+        per_pct,
+        (
+            f"standard_index={INDEX_PER_STRUCTURE_PCT}; "
+            f"high_conviction_index={HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT}; "
+            f"earnings={EARNINGS_PER_STRUCTURE_PCT}"
+        ),
+        RiskReason.PER_STRUCTURE_CAP,
+    )
+    add(
+        "effective_per_structure_budget",
+        True,
+        per_budget,
+        f"current_equity={context.equity} * effective_percent={per_pct}",
+        RiskReason.PER_STRUCTURE_CAP,
+    )
+    if not hard_gates_passed:
         return _rejected(checks)
 
-    per_pct = (
-        EARNINGS_PER_STRUCTURE_PCT
-        if candidate.action is Action.EARNINGS_CONDOR
-        else INDEX_PER_STRUCTURE_PCT
-    )
-    per_budget = context.equity * per_pct
     cluster_remaining = context.equity * INDEX_CLUSTER_PCT - context.index_cluster_defined_loss
     total_remaining = context.equity * TOTAL_DEFINED_LOSS_PCT - context.total_open_defined_loss
-    available = min(per_budget, cluster_remaining, total_remaining)
+    available = max(Decimal("0"), min(per_budget, cluster_remaining, total_remaining))
     quantity = int(
         (available / candidate.structure.maximum_loss).to_integral_value(rounding=ROUND_FLOOR)
     )

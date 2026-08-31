@@ -37,4 +37,12 @@ The minimum entities from `SPEC.md` are represented explicitly: AgentRun, Market
 
 Defaults are conservative and transparent, not statistically optimized: 90-second quotes, minimum 25 contracts of observed volume, minimum 200 open interest, 1.20× implied/realized move richness, a 45% structure-spread-to-credit ceiling, and $5 index wings ($3 for IWM). The compiler can emit zero candidates.
 
-Initial risk is exactly the specification: 0.50% per index/directional structure, 0.35% earnings (reserved), 1.00% SPY/QQQ/IWM cluster, 2.00% total defined loss, 1.00% daily stop, 2.00% peak drawdown, three alpha structures, and one pending entry per underlying.
+Risk is deterministic and based on current equity and defined maximum loss, never the
+broker's buying-power multiple. Index/directional structures normally receive at most
+0.50% of equity; a liquid index candidate can receive at most 1.00% only when validated
+model confidence is at least 0.80, richness is at least 1.50, and every hard gate passes.
+Earnings stays at 0.35%. The shared SPY/QQQ/IWM cap is 2.00%, total concurrent defined
+loss is capped at 3.00%, daily loss at 1.00%, and peak drawdown at 2.00%. At most three
+alpha structures may be open, with no pending duplicate or addition to an existing
+managed underlying. Quantity is always floored from the smallest remaining applicable
+budget, and the effective tier and budget are recorded in the Decision Passport.

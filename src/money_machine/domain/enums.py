@@ -77,6 +77,7 @@ class RiskReason(StrEnum):
     DRAWDOWN = "competition_drawdown_stop"
     OPEN_STRUCTURE_LIMIT = "open_structure_limit"
     PENDING_UNDERLYING = "pending_entry_for_underlying"
+    EXISTING_STRUCTURE = "existing_managed_structure"
     PER_STRUCTURE_CAP = "per_structure_risk_cap"
     CLUSTER_CAP = "correlated_index_cluster_cap"
     TOTAL_CAP = "total_defined_loss_cap"

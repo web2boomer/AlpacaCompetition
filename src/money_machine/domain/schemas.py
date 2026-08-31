@@ -193,6 +193,7 @@ class RiskContext(StrictModel):
     index_cluster_defined_loss: Decimal = Field(ge=0)
     open_alpha_structures: int = Field(ge=0)
     pending_underlyings: frozenset[str] = frozenset()
+    open_underlyings: frozenset[str] = frozenset()
     kill_switch_active: bool = False
     reconciliation_clean: bool = True
 

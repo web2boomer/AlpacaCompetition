@@ -311,16 +311,21 @@ The agent may purchase a small put debit spread when portfolio exposure breaches
 
 ## 10. Deterministic risk policy
 
-Initial limits:
+Competition limits:
 
 - Maximum loss per index or directional structure: 0.50% of current equity.
+- High-conviction liquid index tier: up to 1.00% of current equity only when validated
+  model confidence is at least 0.80, candidate richness is at least 1.50, and every
+  existing data, liquidity, reconciliation, event, directional, and portfolio gate passes.
+  Earnings candidates are never eligible for this tier.
 - Maximum loss per earnings structure: 0.35% of current equity.
-- Maximum combined SPY/QQQ/IWM cluster loss: 1.00% of current equity.
-- Maximum total concurrent defined loss: 2.00% of current equity.
+- Maximum combined SPY/QQQ/IWM cluster loss: 2.00% of current equity.
+- Maximum total concurrent defined loss: 3.00% of current equity.
 - Daily realized plus unrealized loss stop: 1.00% of start-of-day equity.
 - Competition peak-to-trough drawdown stop: 2.00%.
 - Maximum three open alpha structures.
 - Maximum one pending entry per underlying.
+- No pyramiding, adding to, or resizing an existing managed structure.
 - No naked legs.
 - No market orders for multi-leg entries or exits under normal operation.
 - No quantity increase after an adverse move.
@@ -328,7 +333,12 @@ Initial limits:
 
 Risk decisions return machine-readable reason codes. A rejected intent remains visible on the dashboard.
 
-The risk layer calculates quantities from worst-case structure loss and always rounds down. If one contract exceeds a cap, the trade is rejected rather than weakened by changing the defined-risk structure.
+The risk layer calculates quantity as the floor of the minimum of the effective
+per-structure budget, remaining correlated-cluster budget, and remaining total budget,
+divided by per-contract worst-case loss. If one contract exceeds any remaining cap, the
+trade is rejected rather than weakened by changing the defined-risk structure. The chosen
+tier, its thresholds, effective percentage, and effective dollar budget are recorded in
+the Decision Passport risk checks.
 
 An operational kill switch must exist in persistent application state. It is independent of environment configuration and immediately prevents new entries while preserving cancel and close authority.
 
