@@ -469,6 +469,34 @@ class AuditRepository:
                 order.status = "closed"
                 order.last_seen_at = now
 
+    def reconcile_filled_closing_parents(self, *, now: datetime) -> tuple[str, ...]:
+        reconciled: list[str] = []
+        with self.database.session() as session:
+            closing_orders = session.scalars(
+                select(BrokerOrderORM).where(BrokerOrderORM.status == "filled")
+            )
+            for closing_order in closing_orders:
+                request = closing_order.raw_json.get("request", {})
+                if not isinstance(request, dict) or not request.get("is_closing"):
+                    continue
+                candidate_id = closing_order.candidate_id.removesuffix(":close")
+                parent_orders = session.scalars(
+                    select(BrokerOrderORM).where(
+                        BrokerOrderORM.candidate_id == candidate_id,
+                        BrokerOrderORM.status.in_(
+                            ("filled", "closing", "partially_filled_canceled")
+                        ),
+                    )
+                )
+                changed = False
+                for parent_order in parent_orders:
+                    parent_order.status = "closed"
+                    parent_order.last_seen_at = now
+                    changed = True
+                if changed:
+                    reconciled.append(candidate_id)
+        return tuple(dict.fromkeys(reconciled))
+
     def latest_operational_state(self) -> dict[str, Any]:
         with self.database.session() as session:
             state = session.scalar(

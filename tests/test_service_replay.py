@@ -638,6 +638,47 @@ async def test_filled_close_refresh_prevents_already_filled_cancel_regression(
 
 
 @pytest.mark.asyncio
+async def test_restart_reconciles_parent_for_already_normalized_filled_close(
+    settings, repository, replay_adapter, monkeypatch
+) -> None:
+    service, close_request, _close_broker_id = await seed_pending_close(
+        settings, repository, replay_adapter
+    )
+    replay_adapter.data["positions"] = replay_adapter.data["positions"][:2]
+    repository.set_kill_switch(active=True, now=replay_adapter.observed_at)
+    with repository.database.session() as session:
+        close_order = session.scalar(
+            select(BrokerOrderORM).where(
+                BrokerOrderORM.client_order_id == close_request.client_order_id
+            )
+        )
+        assert close_order is not None
+        close_order.status = "filled"
+
+    async def order_lookup_must_not_run(_broker_order_id: str):
+        raise AssertionError("an already-terminal close must not re-enter pending maintenance")
+
+    monkeypatch.setattr(replay_adapter, "order_by_id", order_lookup_must_not_run)
+
+    outcome = await service.run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at + timedelta(minutes=5),
+        mode=RunMode.LIVE,
+    )
+
+    assert outcome.passport["operational_state"]["reconciliation_clean"] is True
+    assert outcome.passport["operational_state"]["incidents"] == []
+    assert any(
+        event["event"] == "closing_parent_terminal_reconciled"
+        and event["candidate_id"] == close_request.candidate_id.removesuffix(":close")
+        for event in outcome.passport["operational_state"]["lifecycle_events"]
+    )
+    assert replay_adapter.canceled_order_ids == []
+    assert repository.open_managed_structures() == ()
+
+
+@pytest.mark.asyncio
 async def test_nonterminal_pending_close_keeps_existing_stale_replacement_path(
     settings, repository, replay_adapter, monkeypatch
 ) -> None:
