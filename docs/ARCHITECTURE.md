@@ -41,15 +41,15 @@ Defaults are conservative and transparent, not statistically optimized: 90-secon
 
 Risk is deterministic and based on current equity and defined maximum loss, never the
 broker's buying-power multiple. Index/directional structures normally receive at most
-0.75% of equity; a liquid index candidate can receive at most 2.00% only when validated
+1.00% of equity; a liquid index candidate can receive at most 3.00% only when validated
 model confidence is at least 0.80 and every hard gate passes. Condors use richness of at
 least 1.50 and reward/risk of at least 0.25 as their strategy-specific confirmation.
 Directional debit spreads on SPY, QQQ, and IWM do not use richness for upsizing; they
 require at least 0.50% deterministic trend strength, at least 2.00 reward/risk, and debit
 no greater than one-third of spread width so expensive premium alone cannot trigger the
 larger tier. Earnings stays
-at 0.35%. The shared SPY/QQQ/IWM cap is 4.00%, total concurrent defined loss is capped at
-5.00%, daily loss at 2.00%, and peak drawdown at 4.00%. At most three
+at 0.35%. The shared SPY/QQQ/IWM cap is 6.00%, total concurrent defined loss is capped at
+8.00%, daily loss at 3.00%, and peak drawdown at 6.00%. At most three
 alpha structures may normally be open, with no pending duplicate or addition to an existing
 managed underlying. A narrow legacy-stack accommodation permits one ordinary-tier SPY or
 IWM index structure only while four or five reconciled open structures are all QQQ and no

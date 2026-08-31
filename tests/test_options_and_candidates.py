@@ -225,10 +225,10 @@ async def test_iwm_directional_candidate_sizes_with_existing_index_caps(replay_a
     result = evaluate_risk(model_decision(candidate), candidate, risk_context())
 
     assert result.approved
-    assert result.quantity == int(Decimal("750") // candidate.structure.maximum_loss)
+    assert result.quantity == int(Decimal("1000") // candidate.structure.maximum_loss)
     assert result.awarded_risk == candidate.structure.maximum_loss * result.quantity
-    assert result.awarded_risk <= Decimal("750")
-    assert risk_check(result, "effective_per_structure_percent").actual == "0.0075"
+    assert result.awarded_risk <= Decimal("1000")
+    assert risk_check(result, "effective_per_structure_percent").actual == "0.01"
 
 
 @pytest.mark.asyncio
@@ -260,8 +260,8 @@ async def test_iwm_directional_legacy_exception_forces_standard_tier(replay_adap
     assert result.approved
     assert candidate.structure.maximum_loss == Decimal("120.00")
     assert candidate.structure.maximum_profit == Decimal("380.00")
-    assert result.quantity == 6
-    assert result.awarded_risk == Decimal("720.00")
-    assert risk_check(result, "effective_per_structure_percent").actual == "0.0075"
+    assert result.quantity == 8
+    assert result.awarded_risk == Decimal("960.00")
+    assert risk_check(result, "effective_per_structure_percent").actual == "0.01"
     assert "applied=true" in risk_check(result, "legacy_qqq_diversification_exception").actual
     assert "applied=false" in risk_check(result, "high_conviction_index_tier").actual

@@ -82,9 +82,9 @@ async def test_replay_end_to_end_generates_decision_passport(
     assert outcome.passport["risk"]["approved"]
     checks = {item["name"]: item for item in outcome.passport["risk"]["checks"]}
     assert "applied=true" in checks["high_conviction_index_tier"]["actual"]
-    assert checks["effective_per_structure_percent"]["actual"] == "0.02"
+    assert checks["effective_per_structure_percent"]["actual"] == "0.03"
     assert Decimal(checks["effective_per_structure_budget"]["actual"]) == (
-        Decimal(outcome.passport["account"]["equity"]) * Decimal("0.02")
+        Decimal(outcome.passport["account"]["equity"]) * Decimal("0.03")
     )
     assert outcome.passport["execution"]["order_type"] == "limit"
     assert outcome.passport["counterfactuals"]["label"].startswith("HYPOTHETICAL")
@@ -181,7 +181,7 @@ async def test_portfolio_filter_excludes_qqq_but_preserves_full_report_and_selec
     )
     checks = {item["name"]: item for item in outcome.passport["risk"]["checks"]}
     assert "applied=true" in checks["legacy_qqq_diversification_exception"]["actual"]
-    assert checks["effective_per_structure_percent"]["actual"] == "0.0075"
+    assert checks["effective_per_structure_percent"]["actual"] == "0.01"
 
 
 @pytest.mark.asyncio

@@ -320,8 +320,8 @@ The agent may purchase a small put debit spread when portfolio exposure breaches
 
 Competition limits:
 
-- Maximum loss per index or directional structure: 0.75% of current equity.
-- High-conviction liquid index tier: up to 2.00% of current equity only when validated
+- Maximum loss per index or directional structure: 1.00% of current equity.
+- High-conviction liquid index tier: up to 3.00% of current equity only when validated
   model confidence is at least 0.80 and every existing data, liquidity, reconciliation,
   event, directional, and portfolio gate passes. Premium-selling index condors additionally
   require richness of at least 1.50 and reward/risk of at least 0.25. Directional debit
@@ -330,14 +330,14 @@ Competition limits:
   richness never qualifies a debit spread for larger sizing because it can reflect expensive
   option premium. Earnings candidates are never eligible for this tier.
 - Maximum loss per earnings structure: 0.35% of current equity.
-- Maximum combined SPY/QQQ/IWM cluster loss: 4.00% of current equity.
-- Maximum total concurrent defined loss: 5.00% of current equity.
-- Daily realized plus unrealized loss stop: 2.00% of start-of-day equity.
-- Competition peak-to-trough drawdown stop: 4.00%.
+- Maximum combined SPY/QQQ/IWM cluster loss: 6.00% of current equity.
+- Maximum total concurrent defined loss: 8.00% of current equity.
+- Daily realized plus unrealized loss stop: 3.00% of start-of-day equity.
+- Competition peak-to-trough drawdown stop: 6.00%.
 - Maximum three open alpha structures.
 - Temporary legacy-stack accommodation: while reconciliation identifies four or five open
   alpha structures all on QQQ, with no pending entry, one SPY or IWM index structure may
-  pass the count gate at the ordinary 0.75% tier only. The accommodation never permits a
+  pass the count gate at the ordinary 1.00% tier only. The accommodation never permits a
   new QQQ structure, high-conviction sizing, pyramiding, or a second distinct-underlying
   entry. It disables itself as soon as a distinct-underlying order is pending or established,
   and the normal maximum-three rule applies automatically once the legacy QQQ count is
