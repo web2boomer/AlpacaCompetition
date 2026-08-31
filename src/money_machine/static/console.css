@@ -3,13 +3,13 @@
 .ops-header h1{font-size:clamp(38px,5vw,64px);line-height:1;letter-spacing:-.055em;margin:10px 0 8px}
 .refresh-card{min-width:500px;border-left:1px solid var(--line);padding-left:24px;display:flex;flex-direction:column;align-items:flex-start;gap:12px;color:var(--muted);font:10px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.06em}
 .competition-clock{display:flex;min-width:0}
-.competition-clock strong{color:var(--paper);font-size:clamp(34px,3.05vw,44px);font-weight:700;line-height:1;letter-spacing:-.055em;white-space:nowrap}
+.competition-clock strong{color:var(--paper);font-size:clamp(42px,4.3vw,64px);font-weight:700;line-height:1;letter-spacing:-.055em;white-space:nowrap}
 .refresh-meta{display:flex;min-width:0;align-items:center;flex-wrap:wrap;gap:8px 18px;color:var(--muted)}
 .live-indicator{display:flex;align-items:center;gap:8px;color:var(--acid)}
 .live-indicator i{width:7px;height:7px;border-radius:50%;background:var(--acid);box-shadow:0 0 14px var(--acid);animation:console-pulse 2s ease-in-out infinite}
 @keyframes console-pulse{50%{opacity:.4;box-shadow:0 0 4px var(--acid)}}
 .ops-grid{display:grid;grid-template-columns:minmax(350px,.82fr) minmax(0,1.35fr);gap:18px;align-items:stretch}
-.overview-grid,.activity-policy-grid{grid-template-columns:minmax(300px,.7fr) minmax(0,1.45fr)}
+.overview-grid{grid-template-columns:minmax(300px,.7fr) minmax(0,1.45fr)}
 .activity-panel{padding:0;overflow:hidden;min-height:390px}
 .activity-head{padding:24px 24px 18px}
 .activity-head h2{font-size:20px;margin:7px 0 0}
@@ -26,7 +26,7 @@
 .activity-entry.danger .activity-status{color:var(--red);border-color:rgba(255,123,102,.3)}
 .ops-chart-panel{min-height:390px;display:flex;flex-direction:column;padding:28px 30px 24px}
 .overview-grid .ops-chart-panel .panel-head{align-items:flex-start;flex-direction:column;gap:16px}
-.ops-chart-panel .equity-value{font-size:clamp(36px,3.3vw,48px)}
+.ops-chart-panel .equity-value{font-size:clamp(44px,4.6vw,68px)}
 .equity-source-state{display:inline-flex;align-items:center;gap:5px;margin-left:8px;color:var(--muted);font-size:8px;letter-spacing:.08em;white-space:nowrap}
 .equity-source-state::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor}
 .equity-source-state[data-state="live"]{color:var(--acid)}
@@ -34,6 +34,8 @@
 .equity-delta{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px}
 .equity-delta strong{color:inherit;font-size:20px;letter-spacing:-.035em}
 .equity-delta .equity-return{font-size:20px}
+.pnl-value.positive{color:var(--acid)}
+.pnl-value.negative{color:var(--red)}
 .ops-equity-chart{height:205px;flex:1;min-height:180px}
 .ops-metrics{margin-top:18px}
 .performance-overview{min-height:390px;padding-bottom:24px}
@@ -46,10 +48,17 @@
 .performance-return span{color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.08em}
 .performance-control-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
 .overview-grid+.decision-workspace{margin-top:18px}
-.activity-policy-grid .activity-feed{max-height:440px}
-.activity-policy-grid .guardrail-panel{min-width:0}
 .decision-workspace{grid-template-columns:1.15fr .85fr}
-.decision-workspace .panel{min-height:310px}
+.decision-workspace{align-items:start}
+.decision-left-stack{display:flex;min-width:0;flex-direction:column;gap:18px}
+.decision-workspace .panel{min-height:0}
+.decision-left-stack .activity-feed{max-height:440px}
+.gate-section .guardrail-panel{min-width:0}
+.gate-section .checks-grid{grid-template-columns:repeat(8,minmax(0,1fr))}
+.gate-section .check{min-width:0;padding:13px 10px;align-items:flex-start}
+.gate-section .check>span{flex:0 0 24px}
+.gate-section .check div{min-width:0}
+.gate-section .check strong,.gate-section .check small{overflow-wrap:anywhere}
 .panel-explainer{max-width:680px;margin:9px 0 0;color:var(--muted);font-size:11px;line-height:1.55}
 .text-link{display:inline-flex;margin-top:22px;color:#294e35;font-size:11px;font-weight:750;text-decoration:none;border-bottom:1px solid rgba(41,78,53,.3);padding-bottom:3px}
 .decision-provenance{display:flex;align-items:center;justify-content:space-between;gap:16px}
@@ -110,8 +119,9 @@
 .methodology-mark{display:grid;place-items:center;width:44px;height:44px;border:1px solid rgba(184,255,96,.28);border-radius:50%;color:var(--acid);font:11px ui-monospace,SFMono-Regular,Menlo,monospace;box-shadow:inset 0 0 20px rgba(184,255,96,.04)}
 .methodology-footnote p{margin:0;color:var(--muted);font-size:10px;line-height:1.7}
 .methodology-footnote strong{color:var(--paper)}
+@media(max-width:1050px){.gate-section .checks-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:900px){.ops-header{align-items:flex-start}.ops-grid,.decision-workspace,.architecture-grid{grid-template-columns:1fr}.activity-panel{min-height:0}.activity-feed{max-height:300px}.performance-grid,.performance-control-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.performance-overview .metric-card:nth-child(even){border-right:0}.architecture-telemetry{border-left:0;border-top:1px solid var(--line);padding:24px 0 0}.system-flow{grid-template-columns:1fr}.flow-node:nth-child(4),.flow-node:nth-child(5),.flow-node:nth-child(6){grid-column:auto;grid-row:auto}.flow-node::after,.flow-node:nth-child(3)::after,.flow-node:nth-child(4)::after,.flow-node:nth-child(5)::after{top:auto;right:50%;bottom:-13px;left:auto;width:1px;height:13px;background:linear-gradient(180deg,var(--acid),rgba(184,255,96,.15))}}
 @media(max-width:900px){.methodology-intro{grid-template-columns:1fr;gap:18px;align-items:start}.methodology-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.method-card{min-height:260px}}
 @media(max-width:850px){.ops-header{flex-direction:column;align-items:stretch;gap:22px}.refresh-card{min-width:0;border-left:0;border-top:1px solid var(--line);padding:18px 0 0}}
-@media(max-width:600px){.ops-header{padding-top:32px}.refresh-card{gap:10px}.competition-clock strong{font-size:clamp(28px,8.5vw,34px)}.refresh-meta{gap:6px 12px;font-size:8px}.activity-entry{grid-template-columns:60px minmax(0,1fr)}.activity-status{display:none}.ops-chart-panel{min-height:330px;padding:22px 18px}.ops-equity-chart{min-height:150px}.ops-metrics{margin-top:14px}.performance-grid,.performance-control-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.performance-overview .metric-card,.performance-overview .metric-card:first-child{padding:18px 12px}.performance-overview .metric-card:nth-child(odd){padding-left:0;border-right:1px solid var(--line)}.performance-overview .metric-card:nth-child(even){padding-right:0}.architecture-section{width:100%;padding:28px 18px;margin-bottom:48px;border-left:0;border-right:0}.architecture-heading{align-items:flex-start;flex-direction:column;gap:20px}.architecture-live{width:100%;padding:14px 0 0;border-left:0;border-top:1px solid var(--line)}.system-flow{grid-template-columns:1fr}.flow-node{min-height:0}.flow-node::after,.flow-node:nth-child(2)::after,.flow-node:nth-child(3)::after,.flow-node:nth-child(4)::after,.flow-node:nth-child(5)::after{top:auto;right:50%;bottom:-13px;left:auto;width:1px;height:13px}.architecture-telemetry dl>div{grid-template-columns:92px minmax(0,1fr)}.methodology-section{margin-bottom:54px}.methodology-grid{grid-template-columns:1fr}.method-card{min-height:230px;padding:22px 18px}.methodology-footnote{grid-template-columns:36px minmax(0,1fr);gap:14px;margin-top:24px}.methodology-mark{width:36px;height:36px}}
+@media(max-width:600px){.ops-header{padding-top:32px}.refresh-card{gap:10px}.competition-clock strong{font-size:clamp(38px,10.5vw,44px)}.refresh-meta{gap:6px 12px;font-size:8px}.activity-entry{grid-template-columns:60px minmax(0,1fr)}.activity-status{display:none}.ops-chart-panel{min-height:330px;padding:22px 18px}.ops-chart-panel .equity-value{font-size:clamp(42px,11.5vw,48px)}.ops-equity-chart{min-height:150px}.ops-metrics{margin-top:14px}.performance-grid,.performance-control-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.performance-overview .metric-card,.performance-overview .metric-card:first-child{padding:18px 12px}.performance-overview .metric-card:nth-child(odd){padding-left:0;border-right:1px solid var(--line)}.performance-overview .metric-card:nth-child(even){padding-right:0}.gate-section .checks-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.architecture-section{width:100%;padding:28px 18px;margin-bottom:48px;border-left:0;border-right:0}.architecture-heading{align-items:flex-start;flex-direction:column;gap:20px}.architecture-live{width:100%;padding:14px 0 0;border-left:0;border-top:1px solid var(--line)}.system-flow{grid-template-columns:1fr}.flow-node{min-height:0}.flow-node::after,.flow-node:nth-child(2)::after,.flow-node:nth-child(3)::after,.flow-node:nth-child(4)::after,.flow-node:nth-child(5)::after{top:auto;right:50%;bottom:-13px;left:auto;width:1px;height:13px}.architecture-telemetry dl>div{grid-template-columns:92px minmax(0,1fr)}.methodology-section{margin-bottom:54px}.methodology-grid{grid-template-columns:1fr}.method-card{min-height:230px;padding:22px 18px}.methodology-footnote{grid-template-columns:36px minmax(0,1fr);gap:14px;margin-top:24px}.methodology-mark{width:36px;height:36px}}
 @media(prefers-reduced-motion:reduce){.live-indicator i,.architecture-live i,.telemetry-note i,.flow-node::after{animation:none}}

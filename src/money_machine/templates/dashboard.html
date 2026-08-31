@@ -10,6 +10,8 @@
 {% set model_validation = passport.get('model_validation', {}) %}
 {% set performance = summary.get('performance', {}) %}
 {% set latest_activity = activity[0] if activity else {} %}
+{% set account_pnl = account.get('pnl', 0)|float %}
+{% set performance_pnl = performance.get('dollar_pnl', 0)|float %}
 <section class="ops-header shell">
   <div>
     <h1>Money Machine</h1>
@@ -35,8 +37,8 @@
       </div>
     </div>
     <div class="equity-delta">
-      <strong id="account-equity-delta">{{ '+' if account.get('pnl', 0)|float >= 0 else '' }}{{ account.get('pnl', 0)|money }}</strong>
-      <strong class="equity-return" id="account-equity-return">{{ '%.4f'|format(account.get('pnl', 0)|float / 1000) }}%</strong>
+      <strong class="pnl-value {{ 'positive' if account_pnl >= 0 else 'negative' }}" id="account-equity-delta">{{ '+' if account_pnl >= 0 else '' }}{{ account.get('pnl', 0)|money }}</strong>
+      <strong class="equity-return pnl-value {{ 'positive' if account_pnl >= 0 else 'negative' }}" id="account-equity-return">{{ '%.4f'|format(account_pnl / 1000) }}%</strong>
       <span>from $100,000 baseline</span>
     </div>
     <svg class="equity-chart ops-equity-chart" viewBox="0 0 720 180" role="img" aria-label="Paper-account equity curve">
@@ -54,7 +56,7 @@
     {% if performance.get('available') %}
     <div class="metric-grid ops-metrics performance-grid" aria-label="Verified account metrics">
       <article class="metric-card"><div class="metric-label">Latest Alpaca equity</div><div class="metric-primary" id="performance-latest-equity">{{ performance.latest_equity|money }}</div><p><time id="performance-latest-at" datetime="{{ performance.latest_snapshot_at }}">{{ performance.latest_snapshot_at }}</time></p></article>
-      <article class="metric-card"><div class="metric-label">Official P&amp;L</div><div class="metric-primary" id="performance-dollar-pnl">{{ performance.dollar_pnl|money }}</div><div class="performance-return"><strong id="performance-return">{{ performance.percentage_return }}%</strong><span>return</span></div></article>
+      <article class="metric-card"><div class="metric-label">Official P&amp;L</div><div class="metric-primary pnl-value {{ 'positive' if performance_pnl >= 0 else 'negative' }}" id="performance-dollar-pnl">{{ performance.dollar_pnl|money }}</div><div class="performance-return"><strong class="pnl-value {{ 'positive' if performance_pnl >= 0 else 'negative' }}" id="performance-return">{{ performance.percentage_return }}%</strong><span>return</span></div></article>
       <article class="metric-card"><div class="metric-label">Peak / max drawdown</div><div class="metric-primary">{{ performance.peak_equity|money }}</div><p>{{ performance.maximum_drawdown|money }} · {{ performance.maximum_drawdown_percent }}%</p></article>
       <article class="metric-card"><div class="metric-label">Broker exposure</div><div class="metric-primary">{{ performance.open_position_count }} positions</div><p>{{ performance.working_order_count }} working orders</p></article>
     </div>
@@ -87,7 +89,8 @@
 </section>
 
 <section class="shell two-col section-gap decision-workspace">
-  <article class="panel auction-panel">
+  <div class="decision-left-stack">
+    <article class="panel auction-panel">
     <div class="panel-head">
       <div>
         <span class="kicker">Risk auction</span>
@@ -109,7 +112,30 @@
       <div class="empty">No structure passed the current data and liquidity gates.</div>
       {% endfor %}
     </div>
-  </article>
+    </article>
+
+    <article class="panel activity-panel">
+      <div class="panel-head activity-head">
+        <div><span class="kicker">Activity tail</span><h2>Recent agent activity</h2></div>
+        <span class="mode-badge">Audit log</span>
+      </div>
+      <div class="activity-feed" id="activity-feed" aria-live="polite" aria-label="Recent agent activity">
+        {% for entry in activity %}
+        <a class="activity-entry {{ entry.tone }}" href="{{ entry.href }}">
+          <time datetime="{{ entry.timestamp }}">{{ entry.display_time }}</time>
+          <span class="activity-copy">
+            <strong>{{ entry.label }}</strong>
+            <small>{{ entry.detail }}</small>
+            {% if entry.reason %}<span class="activity-reason">Why: {{ entry.reason }}</span>{% endif %}
+          </span>
+          <span class="activity-status">{{ entry.status }}</span>
+        </a>
+        {% else %}
+        <div class="empty">Waiting for the first audited cycle.</div>
+        {% endfor %}
+      </div>
+    </article>
+  </div>
 
   <article class="panel decision-panel">
     <div class="decision-provenance">
@@ -126,33 +152,11 @@
   </article>
 </section>
 
-<section class="shell ops-grid activity-policy-grid section-gap">
-  <article class="panel activity-panel">
-    <div class="panel-head activity-head">
-      <div><span class="kicker">Activity tail</span><h2>Recent agent activity</h2></div>
-      <span class="mode-badge">Audit log</span>
-    </div>
-    <div class="activity-feed" id="activity-feed" aria-live="polite" aria-label="Recent agent activity">
-      {% for entry in activity %}
-      <a class="activity-entry {{ entry.tone }}" href="{{ entry.href }}">
-        <time datetime="{{ entry.timestamp }}">{{ entry.display_time }}</time>
-        <span class="activity-copy">
-          <strong>{{ entry.label }}</strong>
-          <small>{{ entry.detail }}</small>
-          {% if entry.reason %}<span class="activity-reason">Why: {{ entry.reason }}</span>{% endif %}
-        </span>
-        <span class="activity-status">{{ entry.status }}</span>
-      </a>
-      {% else %}
-      <div class="empty">Waiting for the first audited cycle.</div>
-      {% endfor %}
-    </div>
-  </article>
-
+<section class="shell gate-section section-gap">
   <article class="panel guardrail-panel">
-    <div class="panel-head"><div><span class="kicker">Deterministic policy</span><h2>Hard gates</h2><p class="panel-explainer">These are fixed safety checks, not model opinions. Every check must pass before an order can be sent; one failure keeps the account in cash.</p></div><span class="mono">{{ risk.get('checks', [])|length }} checks</span></div>
+    <div class="panel-head"><div><span class="kicker">Deterministic policy</span><h2>Hard gates</h2><p class="panel-explainer">These are fixed safety checks, not model opinions. Every check must pass before an order can be sent; one failure keeps the account in cash.</p></div><span class="mono">8 key gates · {{ risk.get('checks', [])|length }} audited</span></div>
     <div class="checks-grid">
-      {% for check in risk.get('checks', []) %}
+      {% for check in risk.get('checks', [])[:8] %}
       <div class="check {{ 'pass' if check.passed else 'fail' }}"><span>{{ '✓' if check.passed else '×' }}</span><div><strong>{{ check.name|replace('_', ' ') }}</strong><small>{{ check.actual }} / {{ check.limit }}</small></div></div>
       {% endfor %}
     </div>
@@ -275,6 +279,12 @@
     const performanceReturn = document.getElementById("performance-return");
     const currency = new Intl.NumberFormat("en-US", {style: "currency", currency: "USD"});
 
+    const setPnlTone = (element, pnl) => {
+      if (!element) return;
+      element.classList.toggle("positive", pnl >= 0);
+      element.classList.toggle("negative", pnl < 0);
+    };
+
     const localTime = (value) => new Date(value).toLocaleTimeString([], {
       hour: "numeric", minute: "2-digit", second: "2-digit"
     });
@@ -295,6 +305,8 @@
       accountEquity.textContent = currency.format(equity);
       accountEquityDelta.textContent = `${pnl >= 0 ? "+" : ""}${currency.format(pnl)}`;
       accountEquityReturn.textContent = `${((pnl / baseline) * 100).toFixed(4)}%`;
+      setPnlTone(accountEquityDelta, pnl);
+      setPnlTone(accountEquityReturn, pnl);
       equitySourceState.textContent = "Live Alpaca";
       equitySourceState.dataset.state = "live";
       if (performanceLatestEquity) performanceLatestEquity.textContent = currency.format(equity);
@@ -302,6 +314,8 @@
       if (performanceReturn && Number.isFinite(baseline) && baseline !== 0) {
         performanceReturn.textContent = `${((pnl / baseline) * 100).toFixed(4)}%`;
       }
+      setPnlTone(performanceDollarPnl, pnl);
+      setPnlTone(performanceReturn, pnl);
       if (performanceLatestAt && observedAt) {
         performanceLatestAt.dateTime = observedAt;
         performanceLatestAt.textContent = localTime(observedAt);

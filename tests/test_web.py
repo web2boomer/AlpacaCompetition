@@ -34,11 +34,15 @@ def test_dashboard_and_health(settings, database) -> None:
     assert "Official competition performance" in response.text
     assert 'class="shell ops-grid overview-grid"' in response.text
     assert 'class="panel performance-overview"' in response.text
-    assert 'class="shell ops-grid activity-policy-grid section-gap"' in response.text
+    assert 'class="decision-left-stack"' in response.text
+    assert 'class="shell gate-section section-gap"' in response.text
     assert "Starting equity" not in response.text
     assert "Flat status" not in response.text
     assert response.text.index("Candidate evaluation") < response.text.index(
         "Recent agent activity"
+    )
+    assert response.text.index("Recent agent activity") < response.text.index(
+        "Latest model decision"
     )
     assert 'aria-label="Current agent metrics"' in response.text
     assert 'class="shell metric-grid ops-metrics"' not in response.text
@@ -49,11 +53,14 @@ def test_dashboard_and_health(settings, database) -> None:
     assert "window.setInterval(refresh, intervalMs)" in response.text
     assert 'id="account-equity" data-baseline="100000" aria-live="polite"' in response.text
     assert 'id="account-equity-return"' in response.text
+    assert 'class="pnl-value positive"' in response.text
     assert 'getElementById("performance-return")' in response.text
     assert 'fetch("/api/account", {cache: "no-store"})' in response.text
     assert 'id="equity-source-state"' in response.text
     assert "renderAccount(await accountResponse.json())" in response.text
     assert "accountEquityReturn.textContent" in response.text
+    assert "setPnlTone(performanceDollarPnl, pnl)" in response.text
+    assert "8 key gates" in response.text
     assert "refresh();" in response.text
     assert "REPLAY — NOT OFFICIAL P&amp;L" not in response.text
     assert health.status_code == 200
