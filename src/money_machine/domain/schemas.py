@@ -166,6 +166,9 @@ class ModelDecisionEnvelope(StrictModel):
     provider: Literal["deterministic", "replay", "openai"] = "deterministic"
     model: str | None = None
     provider_response_id_hash: str | None = None
+    selection_attempts: int = Field(default=1, ge=1, le=2)
+    candidate_id_retry_used: bool = False
+    initial_raw_response_hash: str | None = None
 
 
 class RiskCheck(StrictModel):

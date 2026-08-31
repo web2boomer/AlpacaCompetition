@@ -36,6 +36,7 @@ from money_machine.execution import (
     stale_order_action,
     structure_exit_signal,
 )
+from money_machine.model_provider import safe_model_decision
 from money_machine.persistence.repository import AuditRepository, deterministic_client_order_id
 from money_machine.ports import AlpacaPort, ModelProvider
 from money_machine.safety import verify_account_identity, verify_competition_baseline
@@ -180,21 +181,56 @@ class AgentService:
             )
             report = build_candidates(snapshots, chains, now)
             self.repository.persist_candidates(run_id, report.candidates)
-            envelope = await model.decide(
-                candidates=report.candidates,
-                market_context={
-                    "observed_at": now.isoformat(),
-                    "features": [_snapshot_features(snapshot) for snapshot in snapshots],
-                    "candidate_rejections": report.rejections,
-                },
-                portfolio_context={
-                    "equity": str(account.equity),
-                    "open_defined_loss": str(risk_summary["total_open_defined_loss"]),
-                    "open_structures": risk_summary["open_alpha_structures"],
-                    "execution_state": execution_state.value,
-                    "reconciliation_clean": reconciliation_clean,
-                },
+            portfolio_candidate_exclusions = _portfolio_candidate_exclusions(
+                report.candidates,
+                pending_underlyings=risk_summary["pending_underlyings"],
+                open_underlyings=risk_summary["open_underlyings"],
             )
+            auction_candidates = tuple(
+                candidate
+                for candidate in report.candidates
+                if candidate.candidate_id not in portfolio_candidate_exclusions
+            )
+            market_context = {
+                "observed_at": now.isoformat(),
+                "features": [_snapshot_features(snapshot) for snapshot in snapshots],
+                "candidate_rejections": report.rejections,
+                "portfolio_candidate_exclusions": portfolio_candidate_exclusions,
+            }
+            portfolio_context = {
+                "equity": str(account.equity),
+                "open_defined_loss": str(risk_summary["total_open_defined_loss"]),
+                "open_structures": risk_summary["open_alpha_structures"],
+                "execution_state": execution_state.value,
+                "reconciliation_clean": reconciliation_clean,
+            }
+            if auction_candidates:
+                envelope = await model.decide(
+                    candidates=auction_candidates,
+                    market_context=market_context,
+                    portfolio_context=portfolio_context,
+                )
+            else:
+                envelope = safe_model_decision(
+                    {
+                        "regime": "dislocated",
+                        "action": "abstain",
+                        "candidate_id": None,
+                        "confidence": 1.0,
+                        "thesis": (
+                            "Cash won because every generated candidate was excluded by "
+                            "pending or existing-underlying portfolio state."
+                        ),
+                        "evidence": [
+                            "The full candidate report was preserved for counterfactual audit."
+                        ],
+                        "invalidation": [
+                            "A later cycle may proceed after managed or pending exposure clears."
+                        ],
+                        "maximum_holding_minutes": 0,
+                    },
+                    provider="deterministic",
+                )
             selected = _candidate_by_id(report, envelope.decision.candidate_id)
             operational = self.repository.latest_operational_state()
             context = RiskContext(
@@ -213,7 +249,7 @@ class AgentService:
             )
             risk = evaluate_risk(envelope.decision, selected, context)
             auction = AuctionResult(
-                ranked_candidate_ids=tuple(c.candidate_id for c in report.candidates),
+                ranked_candidate_ids=tuple(c.candidate_id for c in auction_candidates),
                 selected_candidate_id=envelope.decision.candidate_id,
                 cash_won=not risk.approved,
                 awarded_risk=risk.awarded_risk,
@@ -262,6 +298,7 @@ class AgentService:
                 order_result=order_result,
                 reconciliation_incidents=reconciliation_incidents,
                 lifecycle_events=lifecycle_events,
+                portfolio_candidate_exclusions=portfolio_candidate_exclusions,
             )
             self.repository.complete_run(run_id, completed_at=now, passport=passport)
             self.repository.append_system_state(
@@ -548,6 +585,7 @@ def _passport(
     order_result: Any,
     reconciliation_incidents: tuple[str, ...],
     lifecycle_events: tuple[dict[str, Any], ...],
+    portfolio_candidate_exclusions: dict[str, tuple[str, ...]],
 ) -> dict[str, Any]:
     candidates = [candidate.model_dump(mode="json") for candidate in report.candidates]
     submitted_lifecycle = [
@@ -589,6 +627,7 @@ def _passport(
         },
         "evidence": [_snapshot_features(snapshot) for snapshot in snapshots],
         "candidate_rejections": report.rejections,
+        "portfolio_candidate_exclusions": portfolio_candidate_exclusions,
         "candidates": candidates,
         "auction": auction.model_dump(mode="json"),
         "decision": envelope.decision.model_dump(mode="json"),
@@ -597,6 +636,9 @@ def _passport(
             "model": envelope.model,
             "provider_response_id_hash": envelope.provider_response_id_hash,
             "raw_response_hash": envelope.raw_response_hash,
+            "selection_attempts": envelope.selection_attempts,
+            "candidate_id_retry_used": envelope.candidate_id_retry_used,
+            "initial_raw_response_hash": envelope.initial_raw_response_hash,
             "fallback_used": envelope.validation_error is not None,
             "error_type": envelope.validation_error,
         },
@@ -647,6 +689,25 @@ def _passport(
             f"{run_id}|{now.isoformat()}|{envelope.raw_response_hash}".encode()
         ).hexdigest(),
     }
+
+
+def _portfolio_candidate_exclusions(
+    candidates: tuple[Candidate, ...],
+    *,
+    pending_underlyings: frozenset[str],
+    open_underlyings: frozenset[str],
+) -> dict[str, tuple[str, ...]]:
+    exclusions: dict[str, tuple[str, ...]] = {}
+    for candidate in candidates:
+        underlying = candidate.structure.underlying
+        reasons: list[str] = []
+        if underlying in pending_underlyings:
+            reasons.append("pending_entry_for_underlying")
+        if underlying in open_underlyings:
+            reasons.append("existing_managed_structure_for_underlying")
+        if reasons:
+            exclusions[candidate.candidate_id] = tuple(reasons)
+    return exclusions
 
 
 def _snapshot_features(snapshot: UnderlyingSnapshot) -> dict[str, Any]:

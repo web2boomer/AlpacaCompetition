@@ -8,10 +8,12 @@
 2. Verify account identity for live mode, ingest fills idempotently, and reconcile broker exposure to local attribution.
 3. Apply stale-order cancellation/replacement and any mandatory close-only deadline action.
 4. Persist equity, positions, and SPY/QQQ/IWM market evidence.
-5. Compile liquid, defined-risk candidates; an empty set is normal.
-6. Rank candidates in the risk-budget auction.
+5. Compile and persist the full liquid, defined-risk candidate report; an empty set is normal.
+6. Exclude pending/already-managed underlyings from the model-facing auction while retaining
+   them as audited counterfactuals, then rank the remaining candidates.
 7. Ask one provider for the strict `ModelDecision` schema. Invalid output becomes abstention.
-8. Resolve only a supplied candidate ID and run every deterministic risk check.
+8. Resolve only an exact allowed candidate ID and run every deterministic risk check. One
+   explicit exact-membership retry is allowed; a second mismatch abstains without fuzzy matching.
 9. Calculate quantity from maximum loss and round down.
 10. Submit one idempotent multi-leg day limit entry only when authorized.
 11. Persist the model, risk, auction, order/fill lifecycle, operational state, and Decision Passport.

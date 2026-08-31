@@ -132,6 +132,7 @@ class OpenAIModelProvider:
         portfolio_context: dict[str, Any],
     ) -> ModelDecisionEnvelope:
         safe_candidates = [candidate.model_dump(mode="json") for candidate in candidates]
+        allowed_candidate_ids = tuple(candidate.candidate_id for candidate in candidates)
         prompt = {
             "instruction": (
                 "Choose exactly one candidate_id from candidates or abstain. Never invent strikes, "
@@ -142,7 +143,8 @@ class OpenAIModelProvider:
             "portfolio": portfolio_context,
             "candidates": safe_candidates,
         }
-        try:
+
+        async def request_decision(request_prompt: dict[str, Any]) -> ModelDecisionEnvelope:
             response = await self.client.responses.parse(
                 model=self.model,
                 input=[
@@ -150,7 +152,7 @@ class OpenAIModelProvider:
                         "role": "system",
                         "content": "You are the constrained candidate selector for Money Machine.",
                     },
-                    {"role": "user", "content": json.dumps(prompt, default=str)},
+                    {"role": "user", "content": json.dumps(request_prompt, default=str)},
                 ],
                 text_format=ModelDecision,
             )
@@ -167,6 +169,44 @@ class OpenAIModelProvider:
                 provider="openai",
                 model=str(response.model),
                 provider_response_id=str(response.id),
+            )
+
+        try:
+            first = await request_decision(prompt)
+            if (
+                first.decision.action is Action.ABSTAIN
+                or first.decision.candidate_id in allowed_candidate_ids
+            ):
+                return first
+            retry_prompt = {
+                **prompt,
+                "instruction": (
+                    "The previous candidate_id was invalid. Choose exactly one candidate_id "
+                    "from allowed_candidate_ids, copied character-for-character, or abstain. "
+                    "Do not alter punctuation, invent an ID, or choose any excluded candidate."
+                ),
+                "allowed_candidate_ids": allowed_candidate_ids,
+                "previous_invalid_candidate_id": first.decision.candidate_id,
+            }
+            retry = await request_decision(retry_prompt)
+            retry_metadata = {
+                "selection_attempts": 2,
+                "candidate_id_retry_used": True,
+                "initial_raw_response_hash": first.raw_response_hash,
+            }
+            if (
+                retry.decision.action is Action.ABSTAIN
+                or retry.decision.candidate_id in allowed_candidate_ids
+            ):
+                return retry.model_copy(update=retry_metadata)
+            return retry.model_copy(
+                update={
+                    **retry_metadata,
+                    "decision": ModelDecision.abstention(
+                        "Model selected an unknown candidate ID after one retry; cycle abstained."
+                    ),
+                    "validation_error": "UnknownCandidateIdAfterRetry",
+                }
             )
         except Exception as exc:  # provider failures must fail closed
             digest = hashlib.sha256(type(exc).__name__.encode()).hexdigest()

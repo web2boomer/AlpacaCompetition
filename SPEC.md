@@ -245,6 +245,11 @@ It returns a schema-validated object:
 Rules:
 
 - Invalid or incomplete model output becomes `abstain`.
+- Candidates on pending or already-managed underlyings remain in the persisted report and
+  counterfactual evidence but are excluded from the model-facing auction. Their IDs and
+  deterministic exclusion reasons are recorded in the Decision Passport. If the model returns
+  an ID outside the allowed set, it receives one exact-membership retry listing the allowed IDs;
+  a second mismatch fails closed without fuzzy matching.
 - Unsupported actions become `abstain`.
 - The model cannot set quantity, final strikes, account, broker endpoint, or order type.
 - The model cannot override time, drawdown, loss, liquidity, correlation, or event gates.

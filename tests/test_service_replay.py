@@ -96,6 +96,138 @@ async def test_replay_end_to_end_generates_decision_passport(
     assert risk_summary["open_alpha_structures"] == 1
 
 
+class CapturingReplayModel:
+    def __init__(self, preferred_underlying=None) -> None:
+        self.candidates = ()
+        self.preferred_underlying = preferred_underlying
+        self.calls = 0
+
+    async def decide(self, *, candidates, market_context, portfolio_context):
+        del market_context, portfolio_context
+        self.calls += 1
+        self.candidates = tuple(candidates)
+        ranked = self.candidates
+        if self.preferred_underlying is not None:
+            selected = next(
+                candidate
+                for candidate in ranked
+                if candidate.structure.underlying == self.preferred_underlying
+            )
+            ranked = (selected, *(candidate for candidate in ranked if candidate is not selected))
+        return await ReplayModelProvider().decide(
+            candidates=ranked,
+            market_context={},
+            portfolio_context={},
+        )
+
+
+def live_style_risk_summary(*, open_underlyings, pending_underlyings=frozenset()):
+    return {
+        "peak_equity": Decimal("100000"),
+        "start_of_day_equity": Decimal("100000"),
+        "total_open_defined_loss": Decimal("1979"),
+        "index_cluster_defined_loss": Decimal("1979"),
+        "open_alpha_structures": 5,
+        "pending_underlyings": pending_underlyings,
+        "open_underlyings": open_underlyings,
+    }
+
+
+@pytest.mark.asyncio
+async def test_portfolio_filter_excludes_qqq_but_preserves_full_report_and_selects_spy(
+    settings,
+    repository,
+    replay_adapter,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        repository,
+        "portfolio_risk_summary",
+        lambda *_args, **_kwargs: live_style_risk_summary(open_underlyings=frozenset({"QQQ"})),
+    )
+    model = CapturingReplayModel(preferred_underlying="SPY")
+
+    outcome = await AgentService(settings, repository).run_cycle(
+        adapter=replay_adapter,
+        model=model,
+        now=replay_adapter.observed_at,
+        mode=RunMode.REPLAY,
+    )
+
+    assert model.candidates
+    assert model.calls == 1
+    assert {candidate.structure.underlying for candidate in model.candidates} <= {"SPY", "IWM"}
+    assert any(candidate.structure.underlying == "SPY" for candidate in model.candidates)
+    assert outcome.approved
+    assert outcome.order_submitted
+    assert outcome.passport["decision"]["candidate_id"].startswith("spy-")
+    assert outcome.passport["auction"]["ranked_candidate_ids"] == [
+        candidate.candidate_id for candidate in model.candidates
+    ]
+    full_underlyings = {
+        candidate["structure"]["underlying"] for candidate in outcome.passport["candidates"]
+    }
+    assert "QQQ" in full_underlyings
+    exclusions = outcome.passport["portfolio_candidate_exclusions"]
+    assert exclusions
+    assert all(
+        "existing_managed_structure_for_underlying" in reasons
+        for candidate_id, reasons in exclusions.items()
+        if candidate_id.startswith("qqq-")
+    )
+    assert any(
+        alternative["candidate_id"].startswith("qqq-")
+        for alternative in outcome.passport["counterfactuals"]["alternatives"]
+    )
+    checks = {item["name"]: item for item in outcome.passport["risk"]["checks"]}
+    assert "applied=true" in checks["legacy_qqq_diversification_exception"]["actual"]
+    assert checks["effective_per_structure_percent"]["actual"] == "0.0075"
+
+
+@pytest.mark.asyncio
+async def test_portfolio_filter_records_pending_and_open_reasons_and_abstains_when_empty(
+    settings,
+    repository,
+    replay_adapter,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        repository,
+        "portfolio_risk_summary",
+        lambda *_args, **_kwargs: live_style_risk_summary(
+            open_underlyings=frozenset({"QQQ", "IWM"}),
+            pending_underlyings=frozenset({"SPY"}),
+        ),
+    )
+    model = CapturingReplayModel()
+
+    outcome = await AgentService(settings, repository).run_cycle(
+        adapter=replay_adapter,
+        model=model,
+        now=replay_adapter.observed_at,
+        mode=RunMode.REPLAY,
+    )
+
+    assert model.candidates == ()
+    assert model.calls == 0
+    assert not outcome.approved
+    assert not outcome.order_submitted
+    assert outcome.passport["decision"]["action"] == "abstain"
+    assert "every generated candidate was excluded" in outcome.passport["decision"]["thesis"]
+    assert outcome.passport["candidates"]
+    exclusions = outcome.passport["portfolio_candidate_exclusions"]
+    assert any(
+        "pending_entry_for_underlying" in reasons
+        for candidate_id, reasons in exclusions.items()
+        if candidate_id.startswith("spy-")
+    )
+    assert any(
+        "existing_managed_structure_for_underlying" in reasons
+        for candidate_id, reasons in exclusions.items()
+        if candidate_id.startswith("qqq-")
+    )
+
+
 @pytest.mark.asyncio
 async def test_duplicate_cycle_and_order_are_suppressed(
     settings, repository, replay_adapter
