@@ -208,6 +208,17 @@ class AlpacaMcpV2Adapter:
             quotes.append(quote)
         return quotes
 
+    async def stock_snapshots(
+        self, symbols: list[str], *, feed: str | None = None
+    ) -> dict[str, Any]:
+        arguments: dict[str, Any] = {"symbols": ",".join(symbols)}
+        if feed is not None:
+            arguments["feed"] = feed
+        return _as_dict(await self.call_tool("get_stock_snapshot", arguments))
+
+    async def option_snapshots(self, symbols: list[str]) -> dict[str, Any]:
+        return _as_dict(await self.call_tool("get_option_snapshot", {"symbols": ",".join(symbols)}))
+
     async def orders(self, *, status: str = "open") -> list[dict[str, Any]]:
         payload = await self.call_tool("get_orders", {"status": status})
         return _as_list_of_dicts(payload)

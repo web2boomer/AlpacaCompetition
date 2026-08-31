@@ -38,6 +38,38 @@ class ReplayAlpacaAdapter:
     async def option_chain(self, symbol: str) -> list[OptionQuote]:
         return [OptionQuote.model_validate(item) for item in self.data["chains"][symbol]]
 
+    async def stock_snapshots(
+        self, symbols: list[str], *, feed: str | None = None
+    ) -> dict[str, Any]:
+        del feed
+        snapshots: dict[str, Any] = {}
+        for symbol in symbols:
+            raw = next(item for item in self.data["underlyings"] if item["symbol"] == symbol)
+            snapshots[symbol] = {
+                "latestTrade": {"p": raw["spot"], "t": raw["observed_at"]},
+                "dailyBar": {"c": raw["spot"], "t": raw["observed_at"]},
+                "prevDailyBar": {"c": raw["previous_close"], "t": raw["observed_at"]},
+            }
+        return {"snapshots": snapshots}
+
+    async def option_snapshots(self, symbols: list[str]) -> dict[str, Any]:
+        wanted = set(symbols)
+        snapshots: dict[str, Any] = {}
+        for chain in self.data["chains"].values():
+            for raw in chain:
+                if raw["symbol"] not in wanted:
+                    continue
+                snapshots[raw["symbol"]] = {
+                    "latestQuote": {
+                        "bp": raw["bid"],
+                        "ap": raw["ask"],
+                        "t": raw["observed_at"],
+                    },
+                    "impliedVolatility": raw["implied_volatility"],
+                    "greeks": {"delta": raw.get("delta")},
+                }
+        return {"snapshots": snapshots}
+
     async def orders(self, *, status: str = "open") -> list[dict[str, Any]]:
         del status
         return list(self.data.get("orders", []))

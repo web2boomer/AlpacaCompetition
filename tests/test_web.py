@@ -18,6 +18,7 @@ def test_dashboard_and_health(settings, database) -> None:
         liveness = client.get("/api/liveness")
         passport = client.get("/api/passports/latest")
         activity = client.get("/api/activity")
+        overnight = client.get("/api/overnight-estimate")
     assert response.status_code == 200
     assert "Money Machine" in response.text
     assert "Recent agent activity" in response.text
@@ -63,6 +64,9 @@ def test_dashboard_and_health(settings, database) -> None:
     assert "Official P&amp;L" not in response.text
     assert 'fetch("/api/account", {cache: "no-store"})' in response.text
     assert 'id="equity-source-state"' in response.text
+    assert "Provisional out-of-hours mark-to-market" in response.text
+    assert "Estimate · not official P&amp;L" in response.text
+    assert 'fetch("/api/overnight-estimate", {cache: "no-store"})' in response.text
     assert "renderAccount(await accountResponse.json())" in response.text
     assert "accountEquityReturn.textContent" in response.text
     assert "8 key gates" in response.text
@@ -77,6 +81,8 @@ def test_dashboard_and_health(settings, database) -> None:
     assert activity.status_code == 200
     assert activity.json()["entries"]
     assert activity.json()["latest_run_id"] == passport.json()["run_id"]
+    assert overnight.status_code == 200
+    assert overnight.json()["status"] == "market_open"
 
 
 def test_cash_retained_activity_explains_why(settings, database) -> None:

@@ -11,14 +11,15 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from money_machine.adapters.alpaca_mcp import AlpacaMcpV2Adapter
+from money_machine.adapters.alpaca_mcp import AlpacaMcpV2Adapter, parse_occ_symbol
 from money_machine.adapters.replay import ReplayAlpacaAdapter
 from money_machine.domain.clock import BASELINE_EQUITY, ENDS_AT
 from money_machine.domain.enums import RunMode
 from money_machine.model_provider import ReplayModelProvider
+from money_machine.overnight import provisional_overnight_mark
 from money_machine.persistence.database import Database
 from money_machine.persistence.repository import AuditRepository
-from money_machine.ports import BrokeragePort
+from money_machine.ports import AlpacaPort, BrokeragePort
 from money_machine.safety import configured_account_fingerprint
 from money_machine.service import AgentService
 from money_machine.settings import Settings
@@ -26,6 +27,7 @@ from money_machine.settings import Settings
 PACKAGE_DIR = Path(__file__).parent
 ACCOUNT_CACHE_SECONDS = 10
 ACCOUNT_READ_TIMEOUT_SECONDS = 12
+OVERNIGHT_CACHE_SECONDS = 60
 logger = structlog.get_logger()
 
 
@@ -35,6 +37,8 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     repository = AuditRepository(db)
     account_lock = asyncio.Lock()
     account_cache: tuple[datetime, dict[str, Any]] | None = None
+    overnight_lock = asyncio.Lock()
+    overnight_cache: tuple[datetime, dict[str, Any]] | None = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -191,6 +195,35 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
             account_cache = (requested_at, payload)
             return _no_store_response(payload)
 
+    @app.get("/api/overnight-estimate")
+    async def overnight_estimate() -> JSONResponse:
+        nonlocal overnight_cache
+        requested_at = datetime.now(UTC)
+        if overnight_cache is not None:
+            cached_at, cached_payload = overnight_cache
+            if requested_at - cached_at < timedelta(seconds=OVERNIGHT_CACHE_SECONDS):
+                return _no_store_response(cached_payload)
+        async with overnight_lock:
+            requested_at = datetime.now(UTC)
+            if overnight_cache is not None:
+                cached_at, cached_payload = overnight_cache
+                if requested_at - cached_at < timedelta(seconds=OVERNIGHT_CACHE_SECONDS):
+                    return _no_store_response(cached_payload)
+            try:
+                async with asyncio.timeout(ACCOUNT_READ_TIMEOUT_SECONDS):
+                    payload = await _broker_overnight_payload(app_settings)
+            except Exception as exc:
+                logger.warning("overnight_estimate_endpoint_degraded", error=type(exc).__name__)
+                payload = {
+                    "status": "unavailable",
+                    "estimated_equity": None,
+                    "estimated_change_since_close": None,
+                    "observed_at": requested_at.isoformat(),
+                    "message": "The provisional out-of-hours estimate is temporarily unavailable.",
+                }
+            overnight_cache = (requested_at, payload)
+            return _no_store_response(payload)
+
     @app.get("/api/health")
     async def health() -> JSONResponse:
         state = repository.latest_operational_state()
@@ -281,6 +314,74 @@ async def _broker_account_payload(settings: Settings) -> dict[str, Any]:
         return await _read_broker_account(ReplayAlpacaAdapter())
     async with AlpacaMcpV2Adapter(settings) as adapter:
         return await _read_broker_account(adapter)
+
+
+async def _broker_overnight_payload(settings: Settings) -> dict[str, Any]:
+    if settings.run_mode is RunMode.REPLAY:
+        return await _read_overnight_estimate(ReplayAlpacaAdapter())
+    async with AlpacaMcpV2Adapter(settings) as adapter:
+        return await _read_overnight_estimate(adapter)
+
+
+async def _read_overnight_estimate(adapter: AlpacaPort) -> dict[str, Any]:
+    account, positions_raw, market_clock = await asyncio.gather(
+        adapter.account(),
+        adapter.positions(),
+        adapter.market_clock(),
+    )
+    observed_at = datetime.now(UTC)
+    positions = list(positions_raw)
+    if bool(market_clock.get("is_open") or market_clock.get("isOpen")):
+        return {
+            "status": "market_open",
+            "official_equity": str(account.equity),
+            "estimated_equity": None,
+            "estimated_change_since_close": None,
+            "observed_at": observed_at.isoformat(),
+            "message": "Options are open; Alpaca's live account mark is authoritative.",
+        }
+
+    option_symbols = sorted(
+        {
+            str(position.get("symbol") or "")
+            for position in positions
+            if parse_occ_symbol(str(position.get("symbol") or "")) is not None
+        }
+    )
+    underlying_symbols = sorted(
+        {
+            symbol
+            for option_symbol in option_symbols
+            if (parsed := parse_occ_symbol(option_symbol)) is not None
+            for symbol in (parsed[0],)
+        }
+    )
+    if not option_symbols or not underlying_symbols:
+        return provisional_overnight_mark(
+            account=account,
+            positions=positions,
+            option_snapshots={},
+            regular_stock_snapshots={},
+            extended_stock_snapshots={},
+            observed_at=observed_at,
+        )
+
+    option_snapshots, regular_snapshots = await asyncio.gather(
+        adapter.option_snapshots(option_symbols),
+        adapter.stock_snapshots(underlying_symbols),
+    )
+    try:
+        extended_snapshots = await adapter.stock_snapshots(underlying_symbols, feed="overnight")
+    except Exception:
+        extended_snapshots = {}
+    return provisional_overnight_mark(
+        account=account,
+        positions=positions,
+        option_snapshots=option_snapshots,
+        regular_stock_snapshots=regular_snapshots,
+        extended_stock_snapshots=extended_snapshots,
+        observed_at=observed_at,
+    )
 
 
 async def _read_broker_account(adapter: BrokeragePort) -> dict[str, Any]:

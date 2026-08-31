@@ -80,6 +80,24 @@ async def test_alpaca_option_snapshot_preserves_missing_liquidity_as_unknown() -
     assert chain[0].ask_size is None
 
 
+@pytest.mark.asyncio
+async def test_targeted_snapshot_helpers_use_bounded_symbol_requests() -> None:
+    adapter = AlpacaMcpV2Adapter(Settings())
+    adapter.call_tool = AsyncMock(return_value={"snapshots": {}})  # type: ignore[method-assign]
+
+    await adapter.stock_snapshots(["QQQ", "IWM"], feed="overnight")
+    await adapter.option_snapshots(["QQQ260901C00700000", "IWM260901P00290000"])
+
+    assert adapter.call_tool.await_args_list[0].args == (
+        "get_stock_snapshot",
+        {"symbols": "QQQ,IWM", "feed": "overnight"},
+    )
+    assert adapter.call_tool.await_args_list[1].args == (
+        "get_option_snapshot",
+        {"symbols": "QQQ260901C00700000,IWM260901P00290000"},
+    )
+
+
 def _option_snapshot(
     *, bid: str, ask: str, bid_size: int, ask_size: int, volume: int
 ) -> dict[str, object]:

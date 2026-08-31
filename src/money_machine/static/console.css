@@ -38,6 +38,18 @@
 .equity-delta .equity-return{font-size:20px}
 .pnl-value.positive{color:var(--acid)}
 .pnl-value.negative{color:var(--red)}
+.overnight-estimate{margin-top:16px;padding:13px 14px;border:1px solid rgba(213,179,108,.3);background:rgba(213,179,108,.055);border-radius:4px}
+.overnight-estimate[hidden]{display:none}
+.overnight-estimate-head{display:flex;justify-content:space-between;gap:12px;color:#d5b36c;font:700 8px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.08em}
+.overnight-estimate-head strong{font:inherit;color:var(--muted)}
+.overnight-estimate-values{display:flex;align-items:baseline;justify-content:space-between;gap:14px;margin-top:9px}
+.overnight-estimate-values>strong{font-size:18px}
+.overnight-estimate-values>span{color:var(--paper);font:10px ui-monospace,SFMono-Regular,Menlo,monospace}
+.overnight-underlyings{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.overnight-underlyings span{padding:4px 6px;border:1px solid var(--line);border-radius:100px;font:8px ui-monospace,SFMono-Regular,Menlo,monospace}
+.overnight-underlyings .positive{color:var(--acid)}
+.overnight-underlyings .negative{color:var(--red)}
+.overnight-estimate p{margin:9px 0 0;color:var(--muted);font-size:8px;line-height:1.45}
 .ops-equity-chart{height:205px;flex:1;min-height:180px}
 .ops-metrics{margin-top:18px}
 .performance-overview{min-height:390px;padding-bottom:24px}

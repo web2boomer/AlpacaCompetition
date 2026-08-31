@@ -30,6 +30,8 @@ async def test_development_mcp_authentication_and_reads() -> None:
             history = await adapter.portfolio_history()
             snapshot = await adapter.underlying_snapshot("SPY")
             chain = await adapter.option_chain("SPY")
+            stock_snapshots = await adapter.stock_snapshots(["SPY"])
+            option_snapshots = await adapter.option_snapshots([chain[0].symbol])
             open_orders = await adapter.orders(status="open")
             positions = await adapter.positions()
     finally:
@@ -41,5 +43,7 @@ async def test_development_mcp_authentication_and_reads() -> None:
     assert history
     assert snapshot.spot > 0
     assert chain
+    assert stock_snapshots
+    assert option_snapshots
     assert not open_orders
     assert not positions

@@ -10,6 +10,12 @@ The application is built to fail closed. A missing quote, invalid model response
 
 The dashboard leads with paper equity, execution state, current defined risk, the latest constrained model decision, the risk-budget auction, every hard policy check, and the resulting order or abstention. Opening the Decision Passport joins the Alpaca-sourced evidence, alternatives, selection, risk decision, execution, reconciliation state, and outcome under one audit hash.
 
+Outside regular option hours, official Alpaca option P&L remains authoritative and unchanged. The
+dashboard may additionally show a separately labeled provisional mark-to-market based on each held
+option's closing delta and the underlying ETF's extended-hours move. The estimate never enters
+official equity, risk, execution, or reporting calculations and explicitly excludes overnight IV,
+theta, higher-order effects, and opening spreads.
+
 ## Architecture
 
 ```text

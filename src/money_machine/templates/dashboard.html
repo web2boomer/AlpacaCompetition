@@ -40,6 +40,18 @@
       <strong class="equity-return pnl-value {{ 'positive' if account_pnl >= 0 else 'negative' }}" id="account-equity-return">{{ '%.4f'|format(account_pnl / 1000) }}%</strong>
       <span>from $100,000 baseline</span>
     </div>
+    <aside class="overnight-estimate" id="overnight-estimate" hidden aria-live="polite">
+      <div class="overnight-estimate-head">
+        <span>Provisional out-of-hours mark-to-market</span>
+        <strong>Estimate · not official P&amp;L</strong>
+      </div>
+      <div class="overnight-estimate-values">
+        <strong class="pnl-value" id="overnight-change">—</strong>
+        <span id="overnight-equity">Waiting for extended-hours data</span>
+      </div>
+      <div class="overnight-underlyings" id="overnight-underlyings"></div>
+      <p id="overnight-explanation">Based on closing option deltas and extended-hours ETF moves. Not an executable option quote.</p>
+    </aside>
     <svg class="equity-chart ops-equity-chart" viewBox="0 0 720 180" role="img" aria-label="Paper-account equity curve">
       <defs><linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b8ff60" stop-opacity=".32"/><stop offset="1" stop-color="#b8ff60" stop-opacity="0"/></linearGradient></defs>
       <path d="M 12 168 L {{ chart }} L 708 168 Z" fill="url(#area)"/>
@@ -270,6 +282,11 @@
     const accountEquityDelta = document.getElementById("account-equity-delta");
     const accountEquityReturn = document.getElementById("account-equity-return");
     const equitySourceState = document.getElementById("equity-source-state");
+    const overnightEstimate = document.getElementById("overnight-estimate");
+    const overnightChange = document.getElementById("overnight-change");
+    const overnightEquity = document.getElementById("overnight-equity");
+    const overnightUnderlyings = document.getElementById("overnight-underlyings");
+    const overnightExplanation = document.getElementById("overnight-explanation");
     const currency = new Intl.NumberFormat("en-US", {style: "currency", currency: "USD"});
 
     const setPnlTone = (element, pnl) => {
@@ -303,6 +320,36 @@
       equitySourceState.textContent = "Live Alpaca";
       equitySourceState.dataset.state = "live";
       if (observedAt) setUpdated(observedAt);
+    };
+
+    const renderOvernightEstimate = (payload) => {
+      if (!payload || payload.status === "market_open" || payload.status === "not_applicable") {
+        overnightEstimate.hidden = true;
+        return;
+      }
+      overnightEstimate.hidden = false;
+      overnightUnderlyings.replaceChildren();
+      const change = Number(payload.estimated_change_since_close);
+      const estimatedEquity = Number(payload.estimated_equity);
+      if (payload.status === "provisional" && Number.isFinite(change) && Number.isFinite(estimatedEquity)) {
+        overnightChange.textContent = `${change >= 0 ? "+" : ""}${currency.format(change)}`;
+        overnightEquity.textContent = `Indicative equity ${currency.format(estimatedEquity)}`;
+        setPnlTone(overnightChange, change);
+        for (const mark of payload.underlyings || []) {
+          const chip = document.createElement("span");
+          const move = Number(mark.move_percent);
+          chip.textContent = `${mark.symbol} ${move >= 0 ? "+" : ""}${move.toFixed(4)}%`;
+          chip.className = move >= 0 ? "positive" : "negative";
+          overnightUnderlyings.append(chip);
+        }
+        const coverage = payload.coverage || {};
+        overnightExplanation.textContent = `Delta proxy covers ${coverage.covered_option_positions || 0}/${coverage.total_option_positions || 0} option legs. Excludes overnight volatility, theta, higher-order moves and opening spreads.`;
+        return;
+      }
+      overnightChange.textContent = "Estimate unavailable";
+      overnightChange.classList.remove("positive", "negative");
+      overnightEquity.textContent = "Official Alpaca equity remains unchanged";
+      overnightExplanation.textContent = payload.message || "Waiting for a fresh extended-hours ETF trade.";
     };
 
     const renderCountdown = () => {
@@ -360,10 +407,11 @@
 
     const refresh = async () => {
       try {
-        const [activityResponse, healthResponse, accountResponse] = await Promise.all([
+        const [activityResponse, healthResponse, accountResponse, overnightResponse] = await Promise.all([
           fetch("/api/activity", {cache: "no-store"}),
           fetch("/api/health", {cache: "no-store"}),
-          fetch("/api/account", {cache: "no-store"}).catch(() => null)
+          fetch("/api/account", {cache: "no-store"}).catch(() => null),
+          fetch("/api/overnight-estimate", {cache: "no-store"}).catch(() => null)
         ]);
         if (!activityResponse.ok) throw new Error("activity unavailable");
         const [payload, health] = await Promise.all([
@@ -377,6 +425,12 @@
         } catch (_) {
           equitySourceState.textContent = "Latest audited";
           equitySourceState.dataset.state = "stale";
+        }
+        try {
+          if (!overnightResponse?.ok) throw new Error("overnight estimate unavailable");
+          renderOvernightEstimate(await overnightResponse.json());
+        } catch (_) {
+          renderOvernightEstimate({status: "unavailable", message: "Provisional estimate temporarily unavailable."});
         }
         const previousRun = consoleGrid.dataset.latestRunId;
         if (payload.latest_run_id && previousRun !== payload.latest_run_id) {
