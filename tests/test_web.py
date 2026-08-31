@@ -48,9 +48,12 @@ def test_dashboard_and_health(settings, database) -> None:
     assert '<header class="nav shell">' not in response.text
     assert "window.setInterval(refresh, intervalMs)" in response.text
     assert 'id="account-equity" data-baseline="100000" aria-live="polite"' in response.text
+    assert 'id="account-equity-return"' in response.text
+    assert 'getElementById("performance-return")' in response.text
     assert 'fetch("/api/account", {cache: "no-store"})' in response.text
     assert 'id="equity-source-state"' in response.text
     assert "renderAccount(await accountResponse.json())" in response.text
+    assert "accountEquityReturn.textContent" in response.text
     assert "refresh();" in response.text
     assert "REPLAY — NOT OFFICIAL P&amp;L" not in response.text
     assert health.status_code == 200

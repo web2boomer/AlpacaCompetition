@@ -34,7 +34,11 @@
         <div class="equity-value" id="account-equity" data-baseline="100000" aria-live="polite" aria-atomic="true">{{ account.get('equity', 0)|money }}</div>
       </div>
     </div>
-    <div class="equity-delta"><strong id="account-equity-delta">{{ '+' if account.get('pnl', 0)|float >= 0 else '' }}{{ account.get('pnl', 0)|money }}</strong> <span>from $100,000 baseline</span></div>
+    <div class="equity-delta">
+      <strong id="account-equity-delta">{{ '+' if account.get('pnl', 0)|float >= 0 else '' }}{{ account.get('pnl', 0)|money }}</strong>
+      <strong class="equity-return" id="account-equity-return">{{ '%.4f'|format(account.get('pnl', 0)|float / 1000) }}%</strong>
+      <span>from $100,000 baseline</span>
+    </div>
     <svg class="equity-chart ops-equity-chart" viewBox="0 0 720 180" role="img" aria-label="Paper-account equity curve">
       <defs><linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b8ff60" stop-opacity=".32"/><stop offset="1" stop-color="#b8ff60" stop-opacity="0"/></linearGradient></defs>
       <path d="M 12 168 L {{ chart }} L 708 168 Z" fill="url(#area)"/>
@@ -50,7 +54,7 @@
     {% if performance.get('available') %}
     <div class="metric-grid ops-metrics performance-grid" aria-label="Verified account metrics">
       <article class="metric-card"><div class="metric-label">Latest Alpaca equity</div><div class="metric-primary" id="performance-latest-equity">{{ performance.latest_equity|money }}</div><p><time id="performance-latest-at" datetime="{{ performance.latest_snapshot_at }}">{{ performance.latest_snapshot_at }}</time></p></article>
-      <article class="metric-card"><div class="metric-label">Official P&amp;L</div><div class="metric-primary" id="performance-dollar-pnl">{{ performance.dollar_pnl|money }}</div><p><span id="performance-return">{{ performance.percentage_return }}%</span> return</p></article>
+      <article class="metric-card"><div class="metric-label">Official P&amp;L</div><div class="metric-primary" id="performance-dollar-pnl">{{ performance.dollar_pnl|money }}</div><div class="performance-return"><strong id="performance-return">{{ performance.percentage_return }}%</strong><span>return</span></div></article>
       <article class="metric-card"><div class="metric-label">Peak / max drawdown</div><div class="metric-primary">{{ performance.peak_equity|money }}</div><p>{{ performance.maximum_drawdown|money }} · {{ performance.maximum_drawdown_percent }}%</p></article>
       <article class="metric-card"><div class="metric-label">Broker exposure</div><div class="metric-primary">{{ performance.open_position_count }} positions</div><p>{{ performance.working_order_count }} working orders</p></article>
     </div>
@@ -263,6 +267,7 @@
     const competitionCountdown = document.getElementById("competition-countdown");
     const accountEquity = document.getElementById("account-equity");
     const accountEquityDelta = document.getElementById("account-equity-delta");
+    const accountEquityReturn = document.getElementById("account-equity-return");
     const equitySourceState = document.getElementById("equity-source-state");
     const performanceLatestEquity = document.getElementById("performance-latest-equity");
     const performanceLatestAt = document.getElementById("performance-latest-at");
@@ -289,6 +294,7 @@
       const observedAt = payload.observed_at || account.observed_at || payload.timestamp;
       accountEquity.textContent = currency.format(equity);
       accountEquityDelta.textContent = `${pnl >= 0 ? "+" : ""}${currency.format(pnl)}`;
+      accountEquityReturn.textContent = `${((pnl / baseline) * 100).toFixed(4)}%`;
       equitySourceState.textContent = "Live Alpaca";
       equitySourceState.dataset.state = "live";
       if (performanceLatestEquity) performanceLatestEquity.textContent = currency.format(equity);
