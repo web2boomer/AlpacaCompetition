@@ -457,6 +457,18 @@ class AuditRepository:
             order.status = status
             order.last_seen_at = now
 
+    def mark_managed_structure_closed(self, candidate_id: str, *, now: datetime) -> None:
+        with self.database.session() as session:
+            orders = session.scalars(
+                select(BrokerOrderORM).where(
+                    BrokerOrderORM.candidate_id == candidate_id,
+                    BrokerOrderORM.status.in_(("filled", "closing", "partially_filled_canceled")),
+                )
+            )
+            for order in orders:
+                order.status = "closed"
+                order.last_seen_at = now
+
     def latest_operational_state(self) -> dict[str, Any]:
         with self.database.session() as session:
             state = session.scalar(

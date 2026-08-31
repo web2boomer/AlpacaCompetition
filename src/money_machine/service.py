@@ -381,6 +381,10 @@ class AgentService:
                     self.repository.mark_order_status(
                         order.client_order_id, status=broker_status, now=now
                     )
+                    if broker_status == "filled":
+                        self.repository.mark_managed_structure_closed(
+                            order.candidate_id.removesuffix(":close"), now=now
+                        )
                     events.append(
                         {
                             "event": "closing_order_terminal_reconciled",
