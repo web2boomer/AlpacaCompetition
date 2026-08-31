@@ -233,8 +233,9 @@ async def test_next_window_with_stale_data_abstains(settings, repository, replay
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("broker_status", ["submitted", "pending_new", "new"])
 async def test_stale_entry_is_canceled_and_replaced_with_bounded_concession(
-    settings, repository, replay_adapter
+    settings, repository, replay_adapter, broker_status
 ) -> None:
     service = AgentService(settings, repository)
     first = await service.run_cycle(
@@ -248,7 +249,7 @@ async def test_stale_entry_is_canceled_and_replaced_with_bounded_concession(
             select(BrokerOrderORM).where(BrokerOrderORM.agent_run_id == first.run_id)
         )
         assert order is not None
-        order.status = "submitted"
+        order.status = broker_status
 
     second = await service.run_cycle(
         adapter=replay_adapter,

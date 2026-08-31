@@ -345,7 +345,21 @@ class AuditRepository:
         with self.database.session() as session:
             rows = session.scalars(
                 select(BrokerOrderORM).where(
-                    BrokerOrderORM.status.in_(("submitted", "partially_filled"))
+                    BrokerOrderORM.status.in_(
+                        (
+                            "accepted",
+                            "accepted_for_bidding",
+                            "calculated",
+                            "held",
+                            "pending_new",
+                            "pending_cancel",
+                            "pending_replace",
+                            "new",
+                            "stopped",
+                            "submitted",
+                            "partially_filled",
+                        )
+                    )
                 )
             )
             for row in rows:
