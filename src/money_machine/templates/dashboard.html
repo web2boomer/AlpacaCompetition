@@ -27,29 +27,7 @@
   </div>
 </section>
 
-<section class="shell ops-grid" data-latest-run-id="{{ passport.get('run_id', '') }}">
-  <article class="panel activity-panel">
-    <div class="panel-head activity-head">
-      <div><span class="kicker">Activity tail</span><h2>Recent agent activity</h2></div>
-      <span class="mode-badge">Audit log</span>
-    </div>
-    <div class="activity-feed" id="activity-feed" aria-live="polite" aria-label="Recent agent activity">
-      {% for entry in activity %}
-      <a class="activity-entry {{ entry.tone }}" href="{{ entry.href }}">
-        <time datetime="{{ entry.timestamp }}">{{ entry.display_time }}</time>
-        <span class="activity-copy">
-          <strong>{{ entry.label }}</strong>
-          <small>{{ entry.detail }}</small>
-          {% if entry.reason %}<span class="activity-reason">Why: {{ entry.reason }}</span>{% endif %}
-        </span>
-        <span class="activity-status">{{ entry.status }}</span>
-      </a>
-      {% else %}
-      <div class="empty">Waiting for the first audited cycle.</div>
-      {% endfor %}
-    </div>
-  </article>
-
+<section class="shell ops-grid overview-grid" data-latest-run-id="{{ passport.get('run_id', '') }}">
   <article class="equity-panel ops-chart-panel">
     <div class="panel-head">
       <div>
@@ -66,47 +44,44 @@
     </svg>
     <div class="chart-axis"><span>Competition baseline</span><span>Latest audited cycle</span></div>
   </article>
-</section>
-
-<section class="shell panel section-gap performance-overview" aria-labelledby="performance-title">
-  <div class="panel-head">
-    <div><span class="kicker">Verified account evidence</span><h2 id="performance-title">Official competition performance</h2></div>
-    <span class="mode-badge">{{ performance.get('scoring_window_state', 'pre_scoring')|replace('_', ' ') }}</span>
-  </div>
-  {% if performance.get('available') %}
-  <div class="metric-grid ops-metrics performance-grid" aria-label="Verified account metrics">
-    <article class="metric-card"><div class="metric-label">Starting equity</div><div class="metric-primary">{{ performance.starting_equity|money }}</div><p>Fixed competition baseline</p></article>
-    <article class="metric-card"><div class="metric-label">Latest Alpaca equity</div><div class="metric-primary" id="performance-latest-equity">{{ performance.latest_equity|money }}</div><p><time id="performance-latest-at" datetime="{{ performance.latest_snapshot_at }}">{{ performance.latest_snapshot_at }}</time></p></article>
-    <article class="metric-card"><div class="metric-label">Official P&amp;L</div><div class="metric-primary" id="performance-dollar-pnl">{{ performance.dollar_pnl|money }}</div><p><span id="performance-return">{{ performance.percentage_return }}%</span> return</p></article>
-    <article class="metric-card"><div class="metric-label">Peak / max drawdown</div><div class="metric-primary">{{ performance.peak_equity|money }}</div><p>{{ performance.maximum_drawdown|money }} · {{ performance.maximum_drawdown_percent }}%</p></article>
-    <article class="metric-card"><div class="metric-label">Broker exposure</div><div class="metric-primary">{{ performance.open_position_count }} positions</div><p>{{ performance.working_order_count }} working orders</p></article>
-    <article class="metric-card"><div class="metric-label">Flat status</div><div class="metric-primary state"><i></i>{{ 'confirmed flat' if performance.broker_confirmed_flat else 'recovery active' }}</div><p>{{ performance.result_status|replace('_', ' ') }}</p></article>
-  </div>
-  {% else %}
-  <div class="empty">No verified scoring-window equity observation is available yet. Alpaca remains authoritative for the official result.</div>
-  {% endif %}
-  <div class="metric-grid performance-control-grid" aria-label="Current agent metrics">
-    <article class="metric-card">
-      <div class="metric-label">Execution state</div>
-      <div class="metric-primary state"><i></i>{{ state.get('execution_state', 'observe_only')|replace('_', ' ') }}</div>
-      <p>{{ 'Reconciliation clean' if state.get('reconciliation_clean', True) else 'Entries halted by reconciliation' }}</p>
-    </article>
-    <article class="metric-card">
-      <div class="metric-label">Latest decision</div>
-      <div class="metric-primary">{{ decision.get('action', 'abstain')|replace('_', ' ') }}</div>
-      <p>{{ (decision.get('confidence', 0) * 100)|round|int }}% constrained-model confidence</p>
-    </article>
-    <article class="metric-card">
-      <div class="metric-label">Awarded max risk</div>
-      <div class="metric-primary">{{ risk.get('awarded_risk', 0)|money }}</div>
-      <p>{{ risk.get('quantity', 0) }} contract{{ '' if risk.get('quantity', 0) == 1 else 's' }} · rounded down</p>
-    </article>
-    <article class="metric-card">
-      <div class="metric-label">Order state</div>
-      <div class="metric-primary">{{ execution.get('status', 'not submitted')|replace('_', ' ') }}</div>
-      <p>{{ 'Multi-leg limit · idempotent' if execution.get('submitted') else 'Cash retained' }}</p>
-    </article>
-  </div>
+  <article class="panel performance-overview" aria-labelledby="performance-title">
+    <div class="panel-head">
+      <div><span class="kicker">Verified account evidence</span><h2 id="performance-title">Official competition performance</h2></div>
+      <span class="mode-badge">{{ performance.get('scoring_window_state', 'pre_scoring')|replace('_', ' ') }}</span>
+    </div>
+    {% if performance.get('available') %}
+    <div class="metric-grid ops-metrics performance-grid" aria-label="Verified account metrics">
+      <article class="metric-card"><div class="metric-label">Latest Alpaca equity</div><div class="metric-primary" id="performance-latest-equity">{{ performance.latest_equity|money }}</div><p><time id="performance-latest-at" datetime="{{ performance.latest_snapshot_at }}">{{ performance.latest_snapshot_at }}</time></p></article>
+      <article class="metric-card"><div class="metric-label">Official P&amp;L</div><div class="metric-primary" id="performance-dollar-pnl">{{ performance.dollar_pnl|money }}</div><p><span id="performance-return">{{ performance.percentage_return }}%</span> return</p></article>
+      <article class="metric-card"><div class="metric-label">Peak / max drawdown</div><div class="metric-primary">{{ performance.peak_equity|money }}</div><p>{{ performance.maximum_drawdown|money }} · {{ performance.maximum_drawdown_percent }}%</p></article>
+      <article class="metric-card"><div class="metric-label">Broker exposure</div><div class="metric-primary">{{ performance.open_position_count }} positions</div><p>{{ performance.working_order_count }} working orders</p></article>
+    </div>
+    {% else %}
+    <div class="empty">No verified scoring-window equity observation is available yet. Alpaca remains authoritative for the official result.</div>
+    {% endif %}
+    <div class="metric-grid performance-control-grid" aria-label="Current agent metrics">
+      <article class="metric-card">
+        <div class="metric-label">Execution state</div>
+        <div class="metric-primary state"><i></i>{{ state.get('execution_state', 'observe_only')|replace('_', ' ') }}</div>
+        <p>{{ 'Reconciliation clean' if state.get('reconciliation_clean', True) else 'Entries halted by reconciliation' }}</p>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label">Latest decision</div>
+        <div class="metric-primary">{{ decision.get('action', 'abstain')|replace('_', ' ') }}</div>
+        <p>{{ (decision.get('confidence', 0) * 100)|round|int }}% constrained-model confidence</p>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label">Awarded max risk</div>
+        <div class="metric-primary">{{ risk.get('awarded_risk', 0)|money }}</div>
+        <p>{{ risk.get('quantity', 0) }} contract{{ '' if risk.get('quantity', 0) == 1 else 's' }} · rounded down</p>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label">Order state</div>
+        <div class="metric-primary">{{ execution.get('status', 'not submitted')|replace('_', ' ') }}</div>
+        <p>{{ 'Multi-leg limit · idempotent' if execution.get('submitted') else 'Cash retained' }}</p>
+      </article>
+    </div>
+  </article>
 </section>
 
 <section class="shell two-col section-gap decision-workspace">
@@ -149,13 +124,37 @@
   </article>
 </section>
 
-<section class="shell panel section-gap guardrail-panel">
-  <div class="panel-head"><div><span class="kicker">Deterministic policy</span><h2>Hard gates</h2><p class="panel-explainer">These are fixed safety checks, not model opinions. Every check must pass before an order can be sent; one failure keeps the account in cash.</p></div><span class="mono">{{ risk.get('checks', [])|length }} checks</span></div>
-  <div class="checks-grid">
-    {% for check in risk.get('checks', []) %}
-    <div class="check {{ 'pass' if check.passed else 'fail' }}"><span>{{ '✓' if check.passed else '×' }}</span><div><strong>{{ check.name|replace('_', ' ') }}</strong><small>{{ check.actual }} / {{ check.limit }}</small></div></div>
-    {% endfor %}
-  </div>
+<section class="shell ops-grid activity-policy-grid section-gap">
+  <article class="panel activity-panel">
+    <div class="panel-head activity-head">
+      <div><span class="kicker">Activity tail</span><h2>Recent agent activity</h2></div>
+      <span class="mode-badge">Audit log</span>
+    </div>
+    <div class="activity-feed" id="activity-feed" aria-live="polite" aria-label="Recent agent activity">
+      {% for entry in activity %}
+      <a class="activity-entry {{ entry.tone }}" href="{{ entry.href }}">
+        <time datetime="{{ entry.timestamp }}">{{ entry.display_time }}</time>
+        <span class="activity-copy">
+          <strong>{{ entry.label }}</strong>
+          <small>{{ entry.detail }}</small>
+          {% if entry.reason %}<span class="activity-reason">Why: {{ entry.reason }}</span>{% endif %}
+        </span>
+        <span class="activity-status">{{ entry.status }}</span>
+      </a>
+      {% else %}
+      <div class="empty">Waiting for the first audited cycle.</div>
+      {% endfor %}
+    </div>
+  </article>
+
+  <article class="panel guardrail-panel">
+    <div class="panel-head"><div><span class="kicker">Deterministic policy</span><h2>Hard gates</h2><p class="panel-explainer">These are fixed safety checks, not model opinions. Every check must pass before an order can be sent; one failure keeps the account in cash.</p></div><span class="mono">{{ risk.get('checks', [])|length }} checks</span></div>
+    <div class="checks-grid">
+      {% for check in risk.get('checks', []) %}
+      <div class="check {{ 'pass' if check.passed else 'fail' }}"><span>{{ '✓' if check.passed else '×' }}</span><div><strong>{{ check.name|replace('_', ' ') }}</strong><small>{{ check.actual }} / {{ check.limit }}</small></div></div>
+      {% endfor %}
+    </div>
+  </article>
 </section>
 
 <section class="shell architecture-section section-gap" aria-labelledby="architecture-title">
