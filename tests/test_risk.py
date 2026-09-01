@@ -154,6 +154,17 @@ async def test_quantity_rounds_down_to_per_structure_cap(replay_candidate) -> No
     assert result.awarded_risk <= Decimal("1000")
 
 
+def test_daily_loss_provisional_or_latched_state_blocks_entries(replay_candidate) -> None:
+    result = evaluate_risk(
+        decision(replay_candidate),
+        replay_candidate,
+        context(daily_loss_entry_halt_active=True),
+    )
+    assert not result.approved
+    assert check(result, "daily_loss_entry_halt").passed is False
+    assert RiskReason.DAILY_LOSS in result.reason_codes
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("confidence", "richness", "tier_applied", "expected_quantity"),

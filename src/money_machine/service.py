@@ -14,6 +14,7 @@ from money_machine.domain.clock import (
     competition_clock,
     is_official_performance_observation,
 )
+from money_machine.domain.daily_loss import loss_is_plausible, validate_managed_book_marks
 from money_machine.domain.enums import (
     AccountRole,
     AppEnvironment,
@@ -55,9 +56,16 @@ class CycleOutcome:
 
 
 class AgentService:
-    def __init__(self, settings: Settings, repository: AuditRepository) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        repository: AuditRepository,
+        *,
+        daily_loss_confirmation_delay_seconds: float = 15,
+    ) -> None:
         self.settings = settings
         self.repository = repository
+        self.daily_loss_confirmation_delay_seconds = daily_loss_confirmation_delay_seconds
 
     async def run_cycle(
         self,
@@ -86,6 +94,10 @@ class AgentService:
         official = production_account and is_official_performance_observation(now)
         broker_position_count = 0
         working_order_count = 0
+        account_checkpoint_persisted = False
+        checkpoint_positions: list[dict[str, Any]] = []
+        risk_summary: dict[str, Any] | None = None
+        peak_equity = BASELINE_EQUITY
         try:
             account = await adapter.account()
             if mode is RunMode.REPLAY:
@@ -97,6 +109,7 @@ class AgentService:
                 adapter.positions(),
                 adapter.activities(),
             )
+            checkpoint_positions = list(positions)
             broker_position_count = len(positions)
             working_order_count = len(orders)
             if (
@@ -118,14 +131,11 @@ class AgentService:
                 authoritative_absence=mode is RunMode.LIVE,
             )
             risk_summary = self.repository.portfolio_risk_summary(account.equity, now=now)
+            raw_account = account
             peak_equity = max(account.equity, risk_summary["peak_equity"], BASELINE_EQUITY)
-            self.repository.persist_account_checkpoint(
-                run_id,
-                account=account,
-                official=official,
-                peak_equity=peak_equity,
-                positions=list(positions),
-                observed_at=now,
+            daily_control = self.repository.daily_loss_control(
+                now=now,
+                defined_loss_envelope=risk_summary["total_open_defined_loss"],
             )
             market_clock_payload = await adapter.market_clock()
             market_open = bool(market_clock_payload.get("is_open", False))
@@ -148,11 +158,143 @@ class AgentService:
             chains = {
                 symbol: list(chain) for symbol, chain in zip(UNIVERSE, chains_raw, strict=True)
             }
-            portfolio_exit_reason = _portfolio_exit_reason(
-                equity=account.equity,
-                start_of_day_equity=risk_summary["start_of_day_equity"],
-                peak_equity=peak_equity,
+            daily_limit = risk_summary["start_of_day_equity"] * DAILY_LOSS_PCT
+            raw_daily_loss = max(
+                Decimal("0"), risk_summary["start_of_day_equity"] - raw_account.equity
             )
+            mark_quality_reason = "not_required"
+            mark_quality_passed = False
+            plausible_loss = True
+            if (
+                daily_control.status != "latched"
+                and raw_daily_loss >= daily_limit
+                and not reconciliation_clean
+            ):
+                daily_control = self.repository.update_daily_loss_control(
+                    now=now,
+                    status="provisional",
+                    confirmation_count=1,
+                    first_breach_at=now,
+                    last_loss=raw_daily_loss,
+                    defined_loss_envelope=daily_control.defined_loss_envelope,
+                    quote_quality_passed=False,
+                    reason="immediate_reconciliation_safety_exit",
+                )
+                mark_quality_reason = "reconciliation_not_clean"
+                mark_quality_passed = False
+            elif daily_control.status != "latched" and raw_daily_loss >= daily_limit:
+                daily_control = self.repository.update_daily_loss_control(
+                    now=now,
+                    status="provisional",
+                    confirmation_count=1,
+                    first_breach_at=now,
+                    last_loss=raw_daily_loss,
+                    defined_loss_envelope=daily_control.defined_loss_envelope,
+                    quote_quality_passed=False,
+                    reason="raw_breach_awaiting_confirmation",
+                )
+                if self.daily_loss_confirmation_delay_seconds > 0:
+                    await asyncio.sleep(self.daily_loss_confirmation_delay_seconds)
+                confirmed_account = await adapter.account()
+                if mode is not RunMode.REPLAY:
+                    verify_account_identity(self.settings, confirmed_account)
+                account = confirmed_account
+                confirmed_loss = max(
+                    Decimal("0"), risk_summary["start_of_day_equity"] - account.equity
+                )
+                managed = self.repository.open_managed_structures()
+                mark_quality = validate_managed_book_marks(
+                    managed_structures=managed,
+                    positions=checkpoint_positions,
+                    chains=chains,
+                    now=now,
+                )
+                mark_quality_reason = mark_quality.reason
+                mark_quality_passed = mark_quality.passed
+                plausible_loss = not positions or loss_is_plausible(
+                    confirmed_loss, daily_control.defined_loss_envelope
+                )
+                if confirmed_loss < daily_limit:
+                    daily_control = self.repository.update_daily_loss_control(
+                        now=now,
+                        status="clear",
+                        confirmation_count=0,
+                        last_loss=confirmed_loss,
+                        defined_loss_envelope=daily_control.defined_loss_envelope,
+                        quote_quality_passed=mark_quality_passed,
+                        reason="second_observation_recovered",
+                    )
+                elif plausible_loss and mark_quality_passed:
+                    daily_control = self.repository.update_daily_loss_control(
+                        now=now,
+                        status="latched",
+                        confirmation_count=2,
+                        last_loss=confirmed_loss,
+                        defined_loss_envelope=daily_control.defined_loss_envelope,
+                        quote_quality_passed=True,
+                        reason="confirmed_credible_daily_loss_breach",
+                    )
+                else:
+                    reason = (
+                        "loss_exceeds_defined_risk_envelope"
+                        if not plausible_loss
+                        else f"unvalidated_marks:{mark_quality_reason}"
+                    )
+                    daily_control = self.repository.update_daily_loss_control(
+                        now=now,
+                        status="provisional",
+                        confirmation_count=2,
+                        last_loss=confirmed_loss,
+                        defined_loss_envelope=daily_control.defined_loss_envelope,
+                        quote_quality_passed=mark_quality_passed,
+                        reason=reason,
+                    )
+            elif daily_control.status == "provisional" and raw_daily_loss < daily_limit:
+                daily_control = self.repository.update_daily_loss_control(
+                    now=now,
+                    status="clear",
+                    confirmation_count=0,
+                    last_loss=raw_daily_loss,
+                    defined_loss_envelope=daily_control.defined_loss_envelope,
+                    quote_quality_passed=False,
+                    reason="later_cycle_recovered_before_validation",
+                )
+
+            peak_equity = max(account.equity, risk_summary["peak_equity"], BASELINE_EQUITY)
+            self.repository.persist_account_checkpoint(
+                run_id,
+                account=account,
+                official=official,
+                peak_equity=peak_equity,
+                positions=list(positions),
+                observed_at=now,
+            )
+            account_checkpoint_persisted = True
+            safety_equity = min(raw_account.equity, account.equity)
+            drawdown = max(Decimal("0"), peak_equity - safety_equity)
+            portfolio_exit_reason = (
+                "competition_drawdown_limit"
+                if drawdown >= peak_equity * COMPETITION_DRAWDOWN_PCT
+                else "reconciliation_safety_incident"
+                if not reconciliation_clean and raw_daily_loss >= daily_limit
+                else "daily_loss_limit"
+                if daily_control.status == "latched"
+                else None
+            )
+            daily_loss_evidence = {
+                "status": daily_control.status,
+                "entry_halt_active": daily_control.status in {"provisional", "latched"},
+                "confirmation_count": daily_control.confirmation_count,
+                "raw_equity": str(raw_account.equity),
+                "confirmed_equity": str(account.equity),
+                "daily_loss_limit": str(daily_limit),
+                "observed_loss": str(daily_control.last_loss),
+                "defined_loss_envelope": str(daily_control.defined_loss_envelope),
+                "loss_plausible": plausible_loss,
+                "quote_quality_passed": mark_quality_passed,
+                "quote_quality_reason": mark_quality_reason,
+                "reason": daily_control.reason,
+            }
             lifecycle_events, lifecycle_incidents = await self._maintain_order_lifecycle(
                 adapter=adapter,
                 run_id=run_id,
@@ -160,7 +302,10 @@ class AgentService:
                 now=now,
                 clock=clock,
                 market_open=market_open,
-                allow_new_entries=execution_state is ExecutionState.FULL_EXECUTION,
+                allow_new_entries=(
+                    execution_state is ExecutionState.FULL_EXECUTION
+                    and daily_control.status == "clear"
+                ),
                 positions=list(positions),
                 chains=chains,
                 force_close_reason=portfolio_exit_reason,
@@ -246,6 +391,7 @@ class AgentService:
                 open_underlyings=risk_summary["open_underlyings"],
                 kill_switch_active=bool(operational.get("kill_switch_active", False)),
                 reconciliation_clean=reconciliation_clean,
+                daily_loss_entry_halt_active=daily_control.status in {"provisional", "latched"},
             )
             risk = evaluate_risk(envelope.decision, selected, context)
             auction = AuctionResult(
@@ -276,6 +422,7 @@ class AgentService:
                     )
                     order_result = await adapter.place_option_order(order_request)
                     self.repository.persist_order(run_id, order_request, order_result)
+                    self.repository.increase_daily_loss_envelope(now=now, amount=risk.awarded_risk)
 
             passport = _passport(
                 run_id=run_id,
@@ -299,6 +446,7 @@ class AgentService:
                 reconciliation_incidents=reconciliation_incidents,
                 lifecycle_events=lifecycle_events,
                 portfolio_candidate_exclusions=portfolio_candidate_exclusions,
+                daily_loss_control=daily_loss_evidence,
             )
             self.repository.complete_run(run_id, completed_at=now, passport=passport)
             self.repository.append_system_state(
@@ -312,6 +460,21 @@ class AgentService:
             )
             return CycleOutcome(run_id, True, risk.approved, order_result is not None, passport)
         except Exception as exc:
+            if (
+                account is not None
+                and risk_summary is not None
+                and not account_checkpoint_persisted
+                and max(Decimal("0"), risk_summary["start_of_day_equity"] - account.equity)
+                < risk_summary["start_of_day_equity"] * DAILY_LOSS_PCT
+            ):
+                self.repository.persist_account_checkpoint(
+                    run_id,
+                    account=account,
+                    official=official,
+                    peak_equity=peak_equity,
+                    positions=checkpoint_positions,
+                    observed_at=now,
+                )
             incident = type(exc).__name__
             passport = {
                 "run_id": run_id,
@@ -598,6 +761,7 @@ def _passport(
     reconciliation_incidents: tuple[str, ...],
     lifecycle_events: tuple[dict[str, Any], ...],
     portfolio_candidate_exclusions: dict[str, tuple[str, ...]],
+    daily_loss_control: dict[str, Any],
 ) -> dict[str, Any]:
     candidates = [candidate.model_dump(mode="json") for candidate in report.candidates]
     submitted_lifecycle = [
@@ -637,6 +801,7 @@ def _passport(
             "incidents": list(reconciliation_incidents),
             "lifecycle_events": list(lifecycle_events),
         },
+        "daily_loss_control": daily_loss_control,
         "evidence": [_snapshot_features(snapshot) for snapshot in snapshots],
         "candidate_rejections": report.rejections,
         "portfolio_candidate_exclusions": portfolio_candidate_exclusions,
@@ -726,15 +891,3 @@ def _snapshot_features(snapshot: UnderlyingSnapshot) -> dict[str, Any]:
     features = snapshot.model_dump(mode="json")
     features["richness_ratio"] = str(snapshot.richness_ratio)
     return features
-
-
-def _portfolio_exit_reason(
-    *, equity: Decimal, start_of_day_equity: Decimal, peak_equity: Decimal
-) -> str | None:
-    daily_loss = max(Decimal("0"), start_of_day_equity - equity)
-    if daily_loss >= start_of_day_equity * DAILY_LOSS_PCT:
-        return "daily_loss_limit"
-    drawdown = max(Decimal("0"), peak_equity - equity)
-    if drawdown >= peak_equity * COMPETITION_DRAWDOWN_PCT:
-        return "competition_drawdown_limit"
-    return None

@@ -12,7 +12,9 @@ from money_machine.domain.clock import (
     NEW_ENTRY_CUTOFF,
     SCORING_STARTS_AT,
 )
+from money_machine.domain.daily_loss import loss_is_plausible, validate_managed_book_marks
 from money_machine.domain.enums import RunMode
+from money_machine.domain.schemas import AccountSnapshot
 from money_machine.model_provider import ReplayModelProvider
 from money_machine.persistence.models import (
     BrokerOrderORM,
@@ -52,7 +54,11 @@ async def seed_managed_position(settings, repository, replay_adapter, *, quantit
         if candidate["candidate_id"] == selected_id
     )
     replay_adapter.data["positions"] = [
-        {"asset_id": leg["symbol"], "symbol": leg["symbol"], "qty": quantity}
+        {
+            "asset_id": leg["symbol"],
+            "symbol": leg["symbol"],
+            "qty": quantity if leg["side"] == "buy" else f"-{quantity}",
+        }
         for leg in selected["structure"]["legs"]
     ]
     with repository.database.session() as session:
@@ -890,3 +896,207 @@ async def test_equity_checkpoint_survives_market_data_failure(
 
 def test_eod_constant_is_thursday_close() -> None:
     assert EOD_EQUITY_SNAPSHOT_AT.isoformat() == "2026-09-03T20:00:00+00:00"
+
+
+def account_at(equity: str) -> AccountSnapshot:
+    return AccountSnapshot(
+        account_id="REPLAY-PAPER-ACCOUNT",
+        is_paper=True,
+        equity=Decimal(equity),
+        cash=Decimal(equity),
+        buying_power=Decimal(equity) * 2,
+        portfolio_value=Decimal(equity),
+    )
+
+
+@pytest.mark.asyncio
+async def test_impossible_opening_mark_recovers_without_liquidation(
+    settings, repository, replay_adapter, monkeypatch
+) -> None:
+    await seed_managed_position(settings, repository, replay_adapter)
+    before = len(replay_adapter.submitted_requests)
+    accounts = iter((account_at("95849.52"), account_at("99597.00")))
+
+    async def sequenced_account() -> AccountSnapshot:
+        return next(accounts)
+
+    monkeypatch.setattr(replay_adapter, "account", sequenced_account)
+    outcome = await AgentService(
+        production_settings(settings),
+        repository,
+        daily_loss_confirmation_delay_seconds=0,
+    ).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at + timedelta(minutes=5),
+        mode=RunMode.LIVE,
+    )
+
+    assert outcome.passport["daily_loss_control"]["status"] == "clear"
+    assert outcome.passport["daily_loss_control"]["reason"] == "second_observation_recovered"
+    assert len(replay_adapter.submitted_requests) == before
+    with repository.database.session() as session:
+        checkpoint = session.scalar(
+            select(EquitySnapshotORM)
+            .where(EquitySnapshotORM.agent_run_id == outcome.run_id)
+            .limit(1)
+        )
+        assert checkpoint is not None
+        assert checkpoint.equity == Decimal("99597.00")
+
+
+@pytest.mark.asyncio
+async def test_two_credible_breaches_with_fresh_complete_quotes_latch_and_close(
+    settings, repository, replay_adapter, monkeypatch
+) -> None:
+    await seed_managed_position(settings, repository, replay_adapter)
+    cycle_at = replay_adapter.observed_at + timedelta(minutes=5)
+    for chain in replay_adapter.data["chains"].values():
+        for quote in chain:
+            quote["observed_at"] = cycle_at.isoformat()
+    accounts = iter((account_at("96900.00"), account_at("96950.00")))
+
+    async def sequenced_account() -> AccountSnapshot:
+        return next(accounts)
+
+    monkeypatch.setattr(replay_adapter, "account", sequenced_account)
+    outcome = await AgentService(
+        production_settings(settings),
+        repository,
+        daily_loss_confirmation_delay_seconds=0,
+    ).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=cycle_at,
+        mode=RunMode.LIVE,
+    )
+
+    control = outcome.passport["daily_loss_control"]
+    assert control["status"] == "latched", repr(control)
+    assert control["confirmation_count"] == 2
+    assert control["quote_quality_passed"] is True
+    assert replay_adapter.submitted_requests[-1].is_closing
+    assert any(
+        event.get("reason") == "daily_loss_limit"
+        for event in outcome.passport["operational_state"]["lifecycle_events"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_stale_quotes_freeze_entries_without_forced_liquidation(
+    settings, repository, replay_adapter, monkeypatch
+) -> None:
+    await seed_managed_position(settings, repository, replay_adapter)
+    before = len(replay_adapter.submitted_requests)
+    accounts = iter((account_at("96900.00"), account_at("96850.00")))
+
+    async def sequenced_account() -> AccountSnapshot:
+        return next(accounts)
+
+    monkeypatch.setattr(replay_adapter, "account", sequenced_account)
+    outcome = await AgentService(
+        production_settings(settings),
+        repository,
+        daily_loss_confirmation_delay_seconds=0,
+    ).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at + timedelta(minutes=5),
+        mode=RunMode.LIVE,
+    )
+
+    control = outcome.passport["daily_loss_control"]
+    assert control["status"] == "provisional"
+    assert control["entry_halt_active"] is True
+    assert control["quote_quality_reason"].startswith("stale_quote:")
+    assert len(replay_adapter.submitted_requests) == before
+
+
+@pytest.mark.asyncio
+async def test_confirmed_impossible_loss_is_quarantined_without_liquidation(
+    settings, repository, replay_adapter, monkeypatch
+) -> None:
+    await seed_managed_position(settings, repository, replay_adapter)
+    before = len(replay_adapter.submitted_requests)
+    cycle_at = replay_adapter.observed_at + timedelta(minutes=5)
+    for chain in replay_adapter.data["chains"].values():
+        for quote in chain:
+            quote["observed_at"] = cycle_at.isoformat()
+    accounts = iter((account_at("95849.52"), account_at("95849.52")))
+
+    async def sequenced_account() -> AccountSnapshot:
+        return next(accounts)
+
+    monkeypatch.setattr(replay_adapter, "account", sequenced_account)
+    outcome = await AgentService(
+        production_settings(settings),
+        repository,
+        daily_loss_confirmation_delay_seconds=0,
+    ).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=cycle_at,
+        mode=RunMode.LIVE,
+    )
+
+    control = outcome.passport["daily_loss_control"]
+    assert control["status"] == "provisional"
+    assert control["loss_plausible"] is False
+    assert control["quote_quality_passed"] is True
+    assert control["reason"] == "loss_exceeds_defined_risk_envelope"
+    assert len(replay_adapter.submitted_requests) == before
+
+
+def test_daily_loss_latch_is_session_scoped(repository, replay_adapter) -> None:
+    now = replay_adapter.observed_at
+    repository.daily_loss_control(now=now, defined_loss_envelope=Decimal("2000"))
+    repository.update_daily_loss_control(
+        now=now,
+        status="latched",
+        confirmation_count=2,
+        first_breach_at=now,
+        last_loss=Decimal("3100"),
+        defined_loss_envelope=Decimal("2000"),
+        quote_quality_passed=True,
+        reason="confirmed_credible_daily_loss_breach",
+    )
+    assert (
+        repository.daily_loss_control(now=now, defined_loss_envelope=Decimal("0")).status
+        == "latched"
+    )
+    assert (
+        repository.daily_loss_control(
+            now=now + timedelta(days=1), defined_loss_envelope=Decimal("0")
+        ).status
+        == "clear"
+    )
+
+
+def test_opening_mark_regression_exceeds_defined_loss_envelope() -> None:
+    assert not loss_is_plausible(Decimal("4150.48"), Decimal("2125"))
+    assert loss_is_plausible(Decimal("3100"), Decimal("2800"))
+
+
+@pytest.mark.asyncio
+async def test_missing_managed_leg_quote_fails_mark_validation(
+    settings, repository, replay_adapter
+) -> None:
+    await seed_managed_position(settings, repository, replay_adapter)
+    managed = repository.open_managed_structures()
+    missing_symbol = managed[0].structure.legs[0].symbol
+    chains = {
+        symbol: [
+            quote
+            for quote in await replay_adapter.option_chain(symbol)
+            if quote.symbol != missing_symbol
+        ]
+        for symbol in ("SPY", "QQQ", "IWM")
+    }
+    quality = validate_managed_book_marks(
+        managed_structures=managed,
+        positions=replay_adapter.data["positions"],
+        chains=chains,
+        now=replay_adapter.observed_at,
+    )
+    assert not quality.passed
+    assert quality.reason == f"missing_quote:{missing_symbol}"

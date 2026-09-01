@@ -200,6 +200,7 @@ class RiskContext(StrictModel):
     open_underlyings: frozenset[str] = frozenset()
     kill_switch_active: bool = False
     reconciliation_clean: bool = True
+    daily_loss_entry_halt_active: bool = False
 
 
 class AuctionResult(StrictModel):

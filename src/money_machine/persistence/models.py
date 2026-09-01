@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -232,3 +233,17 @@ class SchedulerLeaseORM(Base):
     owner_id: Mapped[str] = mapped_column(String(80), nullable=False)
     acquired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DailyLossControlORM(Base):
+    __tablename__ = "daily_loss_controls"
+
+    session_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    confirmation_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    first_breach_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_loss: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    defined_loss_envelope: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    quote_quality_passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    reason: Mapped[str] = mapped_column(String(80), nullable=False)

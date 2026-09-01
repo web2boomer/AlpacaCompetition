@@ -136,6 +136,13 @@ def evaluate_risk(
     daily_loss = max(Decimal("0"), context.start_of_day_equity - context.equity)
     daily_limit = context.start_of_day_equity * DAILY_LOSS_PCT
     add("daily_loss", daily_loss < daily_limit, daily_loss, daily_limit, RiskReason.DAILY_LOSS)
+    add(
+        "daily_loss_entry_halt",
+        not context.daily_loss_entry_halt_active,
+        context.daily_loss_entry_halt_active,
+        False,
+        RiskReason.DAILY_LOSS,
+    )
     drawdown = max(Decimal("0"), context.peak_equity - context.equity)
     drawdown_limit = context.peak_equity * COMPETITION_DRAWDOWN_PCT
     add(

@@ -1,7 +1,7 @@
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -36,6 +36,7 @@ from money_machine.persistence.models import (
     AuctionORM,
     BrokerOrderORM,
     CandidateORM,
+    DailyLossControlORM,
     EquitySnapshotORM,
     FillORM,
     MarketSnapshotORM,
@@ -57,6 +58,19 @@ class PersistedEquitySnapshot:
     portfolio_value: Decimal
     realized_pl: Decimal
     unrealized_pl: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class DailyLossControl:
+    session_date: date
+    status: str
+    confirmation_count: int
+    first_breach_at: datetime | None
+    last_observed_at: datetime
+    last_loss: Decimal
+    defined_loss_envelope: Decimal
+    quote_quality_passed: bool
+    reason: str
 
 
 class AuditRepository:
@@ -130,6 +144,80 @@ class AuditRepository:
                         raw_hash=_hash(safe),
                     )
                 )
+
+    def daily_loss_control(
+        self, *, now: datetime, defined_loss_envelope: Decimal
+    ) -> DailyLossControl:
+        session_date = now.astimezone(UTC).date()
+        with self.database.session() as session:
+            row = session.get(DailyLossControlORM, session_date)
+            if row is None:
+                row = DailyLossControlORM(
+                    session_date=session_date,
+                    status="clear",
+                    confirmation_count=0,
+                    first_breach_at=None,
+                    last_observed_at=now,
+                    last_loss=Decimal("0"),
+                    defined_loss_envelope=defined_loss_envelope,
+                    quote_quality_passed=False,
+                    reason="no_breach",
+                )
+                session.add(row)
+                session.flush()
+            elif defined_loss_envelope > row.defined_loss_envelope:
+                row.defined_loss_envelope = defined_loss_envelope
+            return _daily_loss_control(row)
+
+    def update_daily_loss_control(
+        self,
+        *,
+        now: datetime,
+        status: str,
+        confirmation_count: int,
+        last_loss: Decimal,
+        defined_loss_envelope: Decimal,
+        quote_quality_passed: bool,
+        reason: str,
+        first_breach_at: datetime | None = None,
+    ) -> DailyLossControl:
+        session_date = now.astimezone(UTC).date()
+        with self.database.session() as session:
+            row = session.get(DailyLossControlORM, session_date)
+            if row is None:
+                row = DailyLossControlORM(
+                    session_date=session_date,
+                    status=status,
+                    confirmation_count=confirmation_count,
+                    first_breach_at=first_breach_at,
+                    last_observed_at=now,
+                    last_loss=last_loss,
+                    defined_loss_envelope=defined_loss_envelope,
+                    quote_quality_passed=quote_quality_passed,
+                    reason=reason,
+                )
+                session.add(row)
+            else:
+                row.status = status
+                row.confirmation_count = confirmation_count
+                row.first_breach_at = row.first_breach_at or first_breach_at
+                row.last_observed_at = now
+                row.last_loss = last_loss
+                row.defined_loss_envelope = max(row.defined_loss_envelope, defined_loss_envelope)
+                row.quote_quality_passed = quote_quality_passed
+                row.reason = reason
+            session.flush()
+            return _daily_loss_control(row)
+
+    def increase_daily_loss_envelope(self, *, now: datetime, amount: Decimal) -> None:
+        if amount <= 0:
+            return
+        session_date = now.astimezone(UTC).date()
+        with self.database.session() as session:
+            row = session.get(DailyLossControlORM, session_date)
+            if row is None:
+                raise RuntimeError("daily-loss control must exist before awarding risk")
+            row.defined_loss_envelope += amount
 
     def persist_market_observations(
         self,
@@ -1223,6 +1311,22 @@ def _persisted_equity(row: EquitySnapshotORM | None) -> PersistedEquitySnapshot 
         portfolio_value=row.portfolio_value,
         realized_pl=row.realized_pl,
         unrealized_pl=row.unrealized_pl,
+    )
+
+
+def _daily_loss_control(row: DailyLossControlORM) -> DailyLossControl:
+    return DailyLossControl(
+        session_date=row.session_date,
+        status=row.status,
+        confirmation_count=row.confirmation_count,
+        first_breach_at=(
+            _safe_datetime(row.first_breach_at) if row.first_breach_at is not None else None
+        ),
+        last_observed_at=_safe_datetime(row.last_observed_at),
+        last_loss=Decimal(str(row.last_loss)),
+        defined_loss_envelope=Decimal(str(row.defined_loss_envelope)),
+        quote_quality_passed=row.quote_quality_passed,
+        reason=row.reason,
     )
 
 

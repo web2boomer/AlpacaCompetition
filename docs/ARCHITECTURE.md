@@ -58,3 +58,10 @@ disables itself after the first distinct-underlying order or when the QQQ legacy
 three or fewer. Quantity is always floored from the smallest remaining applicable budget,
 and the effective tier, legacy-exception evidence, and budget are recorded in the Decision
 Passport.
+
+The daily-loss control is persistent and session-scoped. A raw 3.00% breach immediately
+freezes entries, but a clean defined-risk book is force-closed only after a second account
+observation and complete fresh executable leg quotes validate a plausible loss. A loss beyond
+the persisted defined-loss envelope (plus a documented tolerance) remains quarantined for
+mark-quality review. A credible breach latches through the session; reconciliation and
+structural safety incidents keep immediate close authority.

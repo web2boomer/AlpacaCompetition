@@ -333,6 +333,12 @@ Competition limits:
 - Maximum combined SPY/QQQ/IWM cluster loss: 6.00% of current equity.
 - Maximum total concurrent defined loss: 8.00% of current equity.
 - Daily realized plus unrealized loss stop: 3.00% of start-of-day equity.
+- A raw daily-loss breach freezes new entries immediately. Liquidation of a clean, fully
+  reconciled defined-risk book requires a second broker equity observation plus complete,
+  fresh, internally consistent executable leg quotes. A loss materially beyond the persisted
+  defined-loss envelope is quarantined as a mark-quality incident rather than treated as a
+  credible liquidation signal. A validated breach latches the entry halt through the UTC
+  session; reconciliation and other structural safety incidents retain immediate close authority.
 - Competition peak-to-trough drawdown stop: 6.00%.
 - Maximum three open alpha structures.
 - Temporary legacy-stack accommodation: while reconciliation identifies four or five open
