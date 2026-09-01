@@ -32,10 +32,12 @@ from money_machine.domain.schemas import (
     UnderlyingSnapshot,
 )
 from money_machine.execution import (
+    URGENT_MAX_REPRICE_ATTEMPTS,
     close_request,
     closing_quote_materially_changed,
     daily_hard_exit_deadline,
     entry_holding_policy,
+    refreshed_close_terms,
     replacement_request,
     stale_order_action,
     structure_exit_signal,
@@ -588,6 +590,7 @@ class AgentService:
                     or now >= min(daily_hard_exit_deadline(now), FORCED_FLATTEN_STARTS_AT)
                 )
             )
+            fresh_close_terms = refreshed_close_terms(order, quote_map) if urgent_close else None
             action = (
                 None
                 if cutoff_cancel
@@ -602,6 +605,13 @@ class AgentService:
                         closing_quote_materially_changed(order, quote_map)
                         if order.is_closing
                         else True
+                    ),
+                    urgent_close=urgent_close,
+                    fresh_executable_limit=(
+                        fresh_close_terms[0] if fresh_close_terms is not None else None
+                    ),
+                    fresh_is_credit=(
+                        fresh_close_terms[1] if fresh_close_terms is not None else None
                     ),
                 )
             )
@@ -643,7 +653,11 @@ class AgentService:
                 or action.next_limit is None
             ):
                 continue
-            next_attempt = order.attempt + 1
+            next_attempt = (
+                min(order.attempt + 1, URGENT_MAX_REPRICE_ATTEMPTS)
+                if urgent_close
+                else order.attempt + 1
+            )
             client_order_id = deterministic_client_order_id(
                 self.settings.client_order_prefix,
                 cycle_key=cycle_key,
@@ -659,6 +673,9 @@ class AgentService:
                 client_order_id=client_order_id,
                 next_limit=action.next_limit,
                 environment_role=self.settings.account_role.value,
+                is_credit=action.next_is_credit,
+                legs=fresh_close_terms[2] if fresh_close_terms is not None else None,
+                attempt=next_attempt,
             )
             result = await adapter.place_option_order(request)
             self.repository.persist_order(order.agent_run_id, request, result)
@@ -670,8 +687,11 @@ class AgentService:
                     "broker_order_id": result.broker_order_id,
                     "status": result.status,
                     "quantity": request.quantity,
+                    "limit_price": str(request.limit_price),
+                    "is_credit": request.is_credit,
                     "exit_reason": request.exit_reason,
                     "exit_urgency": request.exit_urgency,
+                    "lifecycle_reason": action.reason,
                 }
             )
 

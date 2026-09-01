@@ -16,6 +16,9 @@ SOFT_STALE_AFTER = timedelta(minutes=15)
 MAX_REPRICE_ATTEMPTS = 2
 REPRICE_INCREMENT = Decimal("0.05")
 MAX_TOTAL_CONCESSION = Decimal("0.10")
+URGENT_REPRICE_INCREMENT = Decimal("0.10")
+URGENT_MAX_REPRICE_ATTEMPTS = 2
+URGENT_MAX_TOTAL_CONCESSION = Decimal("0.30")
 CREDIT_TAKE_PROFIT_FRACTION = Decimal("0.50")
 CREDIT_STOP_LOSS_MULTIPLE = Decimal("2.00")
 DEBIT_TAKE_PROFIT_MULTIPLE = Decimal("1.50")
@@ -27,6 +30,7 @@ class OrderLifecycleAction:
     action: str
     next_limit: Decimal | None
     reason: str
+    next_is_credit: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,12 +118,48 @@ def stale_order_action(
     is_credit: bool,
     soft_close: bool = False,
     quote_materially_changed: bool = True,
+    urgent_close: bool = False,
+    fresh_executable_limit: Decimal | None = None,
+    fresh_is_credit: bool | None = None,
 ) -> OrderLifecycleAction:
     threshold = SOFT_STALE_AFTER if soft_close else STALE_AFTER
     if now - submitted_at < threshold:
         return OrderLifecycleAction("wait", None, "order remains inside stale threshold")
     if soft_close and not quote_materially_changed:
         return OrderLifecycleAction("wait", None, "soft exit quote has not materially changed")
+    if urgent_close:
+        if fresh_executable_limit is None or fresh_is_credit is None:
+            return OrderLifecycleAction(
+                "wait", None, "urgent exit retained because fresh executable quotes are incomplete"
+            )
+        concession = min(
+            URGENT_REPRICE_INCREMENT * (attempt + 1),
+            URGENT_MAX_TOTAL_CONCESSION,
+        )
+        next_limit = (
+            max(Decimal("0.01"), fresh_executable_limit - concession)
+            if fresh_is_credit
+            else fresh_executable_limit + concession
+        )
+        if (
+            attempt >= URGENT_MAX_REPRICE_ATTEMPTS
+            and fresh_is_credit == is_credit
+            and abs(next_limit - original_limit) < REPRICE_INCREMENT
+        ):
+            return OrderLifecycleAction(
+                "wait",
+                None,
+                "urgent exit rests at bounded executable cap; fresh NBBO has not moved",
+            )
+        return OrderLifecycleAction(
+            "cancel_and_replace",
+            next_limit,
+            (
+                "fresh executable NBBO with bounded urgent concession "
+                f"{concession}; cap {URGENT_MAX_TOTAL_CONCESSION}"
+            ),
+            fresh_is_credit,
+        )
     if attempt >= MAX_REPRICE_ATTEMPTS:
         if soft_close:
             return OrderLifecycleAction(
@@ -141,20 +181,52 @@ def replacement_request(
     client_order_id: str,
     next_limit: Decimal,
     environment_role: str,
+    is_credit: bool | None = None,
+    legs: tuple[OptionLeg, ...] | None = None,
+    attempt: int | None = None,
 ) -> BrokerOrderRequest:
     return BrokerOrderRequest(
         client_order_id=client_order_id,
         candidate_id=order.candidate_id,
         quantity=order.remaining_quantity,
         limit_price=next_limit,
-        is_credit=order.is_credit,
-        legs=order.legs,
+        is_credit=order.is_credit if is_credit is None else is_credit,
+        legs=order.legs if legs is None else legs,
         environment_role=environment_role,
-        attempt=order.attempt + 1,
+        attempt=order.attempt + 1 if attempt is None else attempt,
         is_closing=order.is_closing,
         exit_reason=order.exit_reason,
         exit_urgency=order.exit_urgency,
     )
+
+
+def refreshed_close_terms(
+    order: ManagedOrder, quotes: dict[str, OptionQuote]
+) -> tuple[Decimal, bool, tuple[OptionLeg, ...]] | None:
+    cash_required = Decimal("0")
+    refreshed_legs: list[OptionLeg] = []
+    for leg in order.legs:
+        quote = quotes.get(leg.symbol)
+        if quote is None:
+            return None
+        cash_required += (
+            quote.ask * leg.ratio_qty if leg.side is Side.BUY else -(quote.bid * leg.ratio_qty)
+        )
+        refreshed_legs.append(
+            leg.model_copy(
+                update={
+                    "bid": quote.bid,
+                    "ask": quote.ask,
+                    "volume": quote.volume,
+                    "open_interest": quote.open_interest,
+                    "bid_size": quote.bid_size,
+                    "ask_size": quote.ask_size,
+                }
+            )
+        )
+    if cash_required == 0:
+        return None
+    return abs(cash_required), cash_required < 0, tuple(refreshed_legs)
 
 
 def closing_quote_materially_changed(order: ManagedOrder, quotes: dict[str, OptionQuote]) -> bool:

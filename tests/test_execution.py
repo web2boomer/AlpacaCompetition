@@ -159,3 +159,61 @@ def test_soft_close_backs_off_without_quote_change_but_urgent_exit_cancels() -> 
     assert soft.action == "wait"
     assert "materially changed" in soft.reason
     assert urgent.action == "cancel"
+
+
+def test_urgent_close_reprices_from_fresh_executable_nbbo_with_bounded_concession() -> None:
+    submitted = datetime(2026, 9, 1, 14, tzinfo=UTC)
+    debit = stale_order_action(
+        submitted_at=submitted,
+        now=submitted + timedelta(minutes=5),
+        attempt=0,
+        original_limit=Decimal("1.00"),
+        is_credit=False,
+        urgent_close=True,
+        fresh_executable_limit=Decimal("1.40"),
+        fresh_is_credit=False,
+    )
+    credit = stale_order_action(
+        submitted_at=submitted,
+        now=submitted + timedelta(minutes=5),
+        attempt=0,
+        original_limit=Decimal("1.00"),
+        is_credit=True,
+        urgent_close=True,
+        fresh_executable_limit=Decimal("1.40"),
+        fresh_is_credit=True,
+    )
+    assert debit.action == "cancel_and_replace"
+    assert debit.next_limit == Decimal("1.50")
+    assert debit.next_is_credit is False
+    assert credit.action == "cancel_and_replace"
+    assert credit.next_limit == Decimal("1.30")
+    assert credit.next_is_credit is True
+
+
+def test_exhausted_urgent_close_rests_at_cap_until_fresh_nbbo_moves() -> None:
+    submitted = datetime(2026, 9, 1, 14, tzinfo=UTC)
+    resting = stale_order_action(
+        submitted_at=submitted,
+        now=submitted + timedelta(minutes=5),
+        attempt=2,
+        original_limit=Decimal("1.70"),
+        is_credit=False,
+        urgent_close=True,
+        fresh_executable_limit=Decimal("1.40"),
+        fresh_is_credit=False,
+    )
+    moved = stale_order_action(
+        submitted_at=submitted,
+        now=submitted + timedelta(minutes=5),
+        attempt=2,
+        original_limit=Decimal("1.70"),
+        is_credit=False,
+        urgent_close=True,
+        fresh_executable_limit=Decimal("1.60"),
+        fresh_is_credit=False,
+    )
+    assert resting.action == "wait"
+    assert "rests at bounded executable cap" in resting.reason
+    assert moved.action == "cancel_and_replace"
+    assert moved.next_limit == Decimal("1.90")

@@ -740,7 +740,7 @@ async def test_nonterminal_pending_close_keeps_existing_stale_replacement_path(
 
 
 @pytest.mark.asyncio
-async def test_forced_close_exhaustion_reopens_emergency_close_eligibility(
+async def test_exhausted_urgent_close_reprices_from_fresh_quotes_without_attempt_reset(
     settings, repository, replay_adapter, monkeypatch
 ) -> None:
     await seed_managed_position(settings, repository, replay_adapter)
@@ -762,12 +762,34 @@ async def test_forced_close_exhaustion_reopens_emergency_close_eligibility(
         close_order.status = "submitted"
         close_order.attempt = 2
         close_order.submitted_at = FORCED_FLATTEN_STARTS_AT - timedelta(minutes=5)
+    for leg in first_close.legs:
+        raw_quote = next(
+            raw
+            for chain in replay_adapter.data["chains"].values()
+            for raw in chain
+            if raw["symbol"] == leg.symbol
+        )
+        if leg.side.value == "buy":
+            raw_quote["bid"] = "0.90"
+            raw_quote["ask"] = "1.00"
+        else:
+            raw_quote["bid"] = "0.10"
+            raw_quote["ask"] = "0.20"
 
     async def still_working(_broker_order_id: str):
         return {"status": "submitted"}
 
     monkeypatch.setattr(replay_adapter, "order_by_id", still_working)
-    await service.run_cycle(
+    replay_adapter.data["orders"] = [
+        {
+            "id": replay_adapter.submitted_orders[-1].broker_order_id,
+            "client_order_id": first_close.client_order_id,
+            "status": "submitted",
+            "qty": "1",
+            "filled_qty": "0",
+        }
+    ]
+    outcome = await service.run_cycle(
         adapter=replay_adapter,
         model=ReplayModelProvider(),
         now=FORCED_FLATTEN_STARTS_AT + timedelta(minutes=1),
@@ -777,9 +799,48 @@ async def test_forced_close_exhaustion_reopens_emergency_close_eligibility(
     closing_requests = [
         request for request in replay_adapter.submitted_requests if request.is_closing
     ]
-    assert len(closing_requests) == 2
+    assert len(closing_requests) == 2, outcome.passport.get("incident")
     assert closing_requests[0].client_order_id != closing_requests[1].client_order_id
+    replacement = closing_requests[-1]
+    assert replacement.attempt == 2
+    assert replacement.limit_price == Decimal("2.10")
+    assert replacement.is_credit is False
+    assert replacement.quantity == 1
     assert replay_adapter.canceled_order_ids
+    assert any(
+        "fresh executable NBBO with bounded urgent concession 0.30" in event["lifecycle_reason"]
+        for event in outcome.passport["operational_state"]["lifecycle_events"]
+        if event["event"] == "stale_order_canceled"
+    )
+
+    cancel_count = len(replay_adapter.canceled_order_ids)
+    request_count = len(replay_adapter.submitted_requests)
+    with repository.database.session() as session:
+        replacement_row = session.scalar(
+            select(BrokerOrderORM).where(
+                BrokerOrderORM.client_order_id == replacement.client_order_id
+            )
+        )
+        assert replacement_row is not None
+        replacement_row.status = "submitted"
+        replacement_row.submitted_at = FORCED_FLATTEN_STARTS_AT - timedelta(minutes=5)
+    replay_adapter.data["orders"] = [
+        {
+            "id": replay_adapter.submitted_orders[-1].broker_order_id,
+            "client_order_id": replacement.client_order_id,
+            "status": "submitted",
+            "qty": "1",
+            "filled_qty": "0",
+        }
+    ]
+    await service.run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=FORCED_FLATTEN_STARTS_AT + timedelta(minutes=2),
+        mode=RunMode.LIVE,
+    )
+    assert len(replay_adapter.canceled_order_ids) == cancel_count
+    assert len(replay_adapter.submitted_requests) == request_count
 
 
 @pytest.mark.asyncio
