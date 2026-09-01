@@ -41,6 +41,7 @@ from money_machine.execution import (
     replacement_request,
     stale_order_action,
     structure_exit_signal,
+    urgent_close_debit_cap,
 )
 from money_machine.model_provider import safe_model_decision
 from money_machine.persistence.repository import AuditRepository, deterministic_client_order_id
@@ -613,6 +614,7 @@ class AgentService:
                     fresh_is_credit=(
                         fresh_close_terms[1] if fresh_close_terms is not None else None
                     ),
+                    urgent_debit_cap=(urgent_close_debit_cap(order) if urgent_close else None),
                 )
             )
             closing_candidate = order.candidate_id.removesuffix(":close")

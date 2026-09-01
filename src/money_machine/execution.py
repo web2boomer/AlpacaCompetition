@@ -121,6 +121,7 @@ def stale_order_action(
     urgent_close: bool = False,
     fresh_executable_limit: Decimal | None = None,
     fresh_is_credit: bool | None = None,
+    urgent_debit_cap: Decimal | None = None,
 ) -> OrderLifecycleAction:
     threshold = SOFT_STALE_AFTER if soft_close else STALE_AFTER
     if now - submitted_at < threshold:
@@ -132,15 +133,30 @@ def stale_order_action(
             return OrderLifecycleAction(
                 "wait", None, "urgent exit retained because fresh executable quotes are incomplete"
             )
-        concession = min(
-            URGENT_REPRICE_INCREMENT * (attempt + 1),
-            URGENT_MAX_TOTAL_CONCESSION,
-        )
-        next_limit = (
-            max(Decimal("0.01"), fresh_executable_limit - concession)
-            if fresh_is_credit
-            else fresh_executable_limit + concession
-        )
+        hard_cap_applied = attempt >= URGENT_MAX_REPRICE_ATTEMPTS
+        if hard_cap_applied and (fresh_is_credit or urgent_debit_cap is not None):
+            next_limit = Decimal("0.01") if fresh_is_credit else urgent_debit_cap
+            if next_limit is None:  # narrowed by the branch condition
+                raise AssertionError("urgent debit cap unexpectedly missing")
+            concession = abs(next_limit - fresh_executable_limit)
+            pricing_reason = (
+                "fresh executable NBBO with defined-risk hard cap "
+                f"{next_limit}; concession {concession}"
+            )
+        else:
+            concession = min(
+                URGENT_REPRICE_INCREMENT * (attempt + 1),
+                URGENT_MAX_TOTAL_CONCESSION,
+            )
+            next_limit = (
+                max(Decimal("0.01"), fresh_executable_limit - concession)
+                if fresh_is_credit
+                else fresh_executable_limit + concession
+            )
+            pricing_reason = (
+                "fresh executable NBBO with bounded urgent concession "
+                f"{concession}; cap {URGENT_MAX_TOTAL_CONCESSION}"
+            )
         if (
             attempt >= URGENT_MAX_REPRICE_ATTEMPTS
             and fresh_is_credit == is_credit
@@ -149,15 +165,12 @@ def stale_order_action(
             return OrderLifecycleAction(
                 "wait",
                 None,
-                "urgent exit rests at bounded executable cap; fresh NBBO has not moved",
+                "urgent exit rests at defined-risk hard cap; no safer price remains",
             )
         return OrderLifecycleAction(
             "cancel_and_replace",
             next_limit,
-            (
-                "fresh executable NBBO with bounded urgent concession "
-                f"{concession}; cap {URGENT_MAX_TOTAL_CONCESSION}"
-            ),
+            pricing_reason,
             fresh_is_credit,
         )
     if attempt >= MAX_REPRICE_ATTEMPTS:
@@ -227,6 +240,15 @@ def refreshed_close_terms(
     if cash_required == 0:
         return None
     return abs(cash_required), cash_required < 0, tuple(refreshed_legs)
+
+
+def urgent_close_debit_cap(order: ManagedOrder) -> Decimal | None:
+    widths: list[Decimal] = []
+    for right in {leg.right for leg in order.legs}:
+        strikes = sorted({leg.strike for leg in order.legs if leg.right is right})
+        if len(strikes) >= 2:
+            widths.append(strikes[-1] - strikes[0])
+    return max(widths) if widths else None
 
 
 def closing_quote_materially_changed(order: ManagedOrder, quotes: dict[str, OptionQuote]) -> bool:

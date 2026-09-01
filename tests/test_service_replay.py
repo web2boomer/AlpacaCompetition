@@ -803,12 +803,12 @@ async def test_exhausted_urgent_close_reprices_from_fresh_quotes_without_attempt
     assert closing_requests[0].client_order_id != closing_requests[1].client_order_id
     replacement = closing_requests[-1]
     assert replacement.attempt == 2
-    assert replacement.limit_price == Decimal("2.10")
+    assert replacement.limit_price == Decimal("5.00")
     assert replacement.is_credit is False
     assert replacement.quantity == 1
     assert replay_adapter.canceled_order_ids
     assert any(
-        "fresh executable NBBO with bounded urgent concession 0.30" in event["lifecycle_reason"]
+        "fresh executable NBBO with defined-risk hard cap 5" in event["lifecycle_reason"]
         for event in outcome.passport["operational_state"]["lifecycle_events"]
         if event["event"] == "stale_order_canceled"
     )

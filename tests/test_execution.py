@@ -197,11 +197,12 @@ def test_exhausted_urgent_close_rests_at_cap_until_fresh_nbbo_moves() -> None:
         submitted_at=submitted,
         now=submitted + timedelta(minutes=5),
         attempt=2,
-        original_limit=Decimal("1.70"),
+        original_limit=Decimal("5.00"),
         is_credit=False,
         urgent_close=True,
         fresh_executable_limit=Decimal("1.40"),
         fresh_is_credit=False,
+        urgent_debit_cap=Decimal("5.00"),
     )
     moved = stale_order_action(
         submitted_at=submitted,
@@ -212,8 +213,9 @@ def test_exhausted_urgent_close_rests_at_cap_until_fresh_nbbo_moves() -> None:
         urgent_close=True,
         fresh_executable_limit=Decimal("1.60"),
         fresh_is_credit=False,
+        urgent_debit_cap=Decimal("5.00"),
     )
     assert resting.action == "wait"
-    assert "rests at bounded executable cap" in resting.reason
+    assert "rests at defined-risk hard cap" in resting.reason
     assert moved.action == "cancel_and_replace"
-    assert moved.next_limit == Decimal("1.90")
+    assert moved.next_limit == Decimal("5.00")
