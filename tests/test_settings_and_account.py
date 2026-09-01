@@ -78,7 +78,7 @@ def test_forbidden_execution_enabled_toggle(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_forbidden_mission_control_enable_toggle(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MISSION_CONTROL_REPORTING_ENABLED", "true")
-    with pytest.raises(ValidationError, match="scheduling controls reporting"):
+    with pytest.raises(ValidationError, match="Mission Control pulls the report endpoint"):
         configured_settings()
 
 

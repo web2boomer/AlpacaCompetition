@@ -55,7 +55,8 @@ class Settings(BaseSettings):
             )
         if "MISSION_CONTROL_REPORTING_ENABLED" in os.environ:
             raise ValueError(
-                "MISSION_CONTROL_REPORTING_ENABLED is forbidden; scheduling controls reporting"
+                "MISSION_CONTROL_REPORTING_ENABLED is forbidden; "
+                "Mission Control pulls the report endpoint"
             )
         valid_pair = {
             AppEnvironment.DEVELOPMENT: AccountRole.DEVELOPMENT,

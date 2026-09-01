@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -7,12 +8,13 @@ from typing import Any
 
 import structlog
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from money_machine.adapters.alpaca_mcp import AlpacaMcpV2Adapter, parse_occ_symbol
 from money_machine.adapters.replay import ReplayAlpacaAdapter
+from money_machine.business_reporting import PROJECT, BusinessReportBuilder
 from money_machine.domain.clock import BASELINE_EQUITY, ENDS_AT, EOD_EQUITY_SNAPSHOT_AT
 from money_machine.domain.enums import RunMode
 from money_machine.model_provider import ReplayModelProvider
@@ -264,6 +266,34 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
             status_code=200 if database_ok else 503,
         )
 
+    @app.get("/internal/mission_control/report")
+    async def mission_control_report(request: Request) -> Response:
+        if not _mission_control_authorized(request, app_settings):
+            return Response(status_code=401)
+        if app_settings.mission_control_project != PROJECT:
+            logger.warning(
+                "mission_control_reporting_project_mismatch",
+                configured_project=app_settings.mission_control_project,
+            )
+            return Response(status_code=503, headers={"Retry-After": "60"})
+        try:
+            report = BusinessReportBuilder(
+                repository,
+                interval_minutes=app_settings.mission_control_reporting_interval_minutes,
+                account_fingerprint=configured_account_fingerprint(app_settings),
+            ).build(
+                now=datetime.now(UTC),
+                environment=(
+                    app_settings.mission_control_environment or app_settings.app_env.value
+                ),
+            )
+        except Exception as exc:
+            logger.warning("mission_control_report_failed", error_type=type(exc).__name__)
+            return Response(status_code=503, headers={"Retry-After": "60"})
+        if report is None:
+            return Response(status_code=204)
+        return JSONResponse(report.as_payload())
+
     return app
 
 
@@ -414,3 +444,17 @@ def _no_store_response(payload: dict[str, Any], *, status_code: int = 200) -> JS
         status_code=status_code,
         headers={"Cache-Control": "no-store, max-age=0"},
     )
+
+
+def _mission_control_authorized(request: Request, settings: Settings) -> bool:
+    configured = settings.mission_control_token
+    if configured is None:
+        return False
+    expected = configured.get_secret_value()
+    authorization = request.headers.get("authorization", "")
+    if not authorization.startswith("Bearer "):
+        return False
+    provided = authorization.removeprefix("Bearer ")
+    if not expected or not provided or len(expected) != len(provided):
+        return False
+    return hmac.compare_digest(provided, expected)

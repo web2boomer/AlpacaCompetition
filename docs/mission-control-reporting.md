@@ -1,15 +1,18 @@
 # Mission Control business reporting
 
-The scheduler worker pushes one consolidated Business Performance Protocol v1 report for
-`alpaca-competition` every 60 minutes. Reports are built entirely from completed rows in the local
-`equity_snapshots` audit table for the verified production competition account. Reporting never
-calls Alpaca and never exposes Alpaca or database credentials to Mission Control.
+Mission Control pulls one consolidated Business Performance Protocol v1 report for
+`alpaca-competition` from `GET /internal/mission_control/report`. Reports are built entirely from
+completed rows in the local `equity_snapshots` audit table for the verified production competition
+account. Reporting never calls Alpaca and never exposes Alpaca or database credentials to Mission
+Control. There is no product-side scheduler push.
 
-Before scoring begins, the worker sends an `estimated` pre-competition telemetry report so Mission
-Control can verify the reporting uplink and display current paper equity/P&L. Its metadata includes
-`official_scoring_window: false` and `scoring_window_state: pre_scoring`; the P&L label is
+Before scoring begins, the endpoint returns an `estimated` pre-competition telemetry report so
+Mission Control can verify the reporting uplink and display current paper equity/P&L. Its metadata
+includes `official_scoring_window: false` and `scoring_window_state: pre_scoring`; the P&L label is
 `Pre-competition paper P&L`. This reporting does not grant trading authority and does not classify
 weekend observations as official competition performance.
+
+HTTP 204 means no completed official equity period is available yet.
 
 ## Paper P&L exception
 
@@ -44,34 +47,26 @@ zero or guess in their place.
 
 ## Configuration and rollout
 
-The scheduler worker reads:
+The web service reads:
 
-- `MISSION_CONTROL_URL`
 - `MISSION_CONTROL_PROJECT=alpaca-competition`
 - `MISSION_CONTROL_TOKEN` (the distinct token for this project only)
 - `MISSION_CONTROL_REPORTING_INTERVAL_MINUTES=60`
 - `MISSION_CONTROL_ENVIRONMENT=production`
 
-There is intentionally no reporting enable flag. Missing URL/token configuration logs a redacted
-warning and does not submit. A configured project slug other than `alpaca-competition` is rejected
-before transport. Delivery uses HTTPS Bearer auth, five-second timeouts, at most three attempts for
-network/429/5xx failures, and treats HTTP 409 as an already-delivered success. Logs include only the
-report ID, duplicate flag, error class, and HTTP status.
+The product does not need `MISSION_CONTROL_URL` for pull. Keep it only if you still use
+`money-machine mission-control-report` as a compatibility submitter. There is intentionally no
+reporting enable flag. A configured project slug other than `alpaca-competition` is rejected
+before a payload is returned. Logs include only the report ID, duplicate flag, error class, and
+HTTP status.
 
-Before setting the worker's token, reconcile the exact persisted payload without sending:
+Before Mission Control starts polling, reconcile the exact persisted payload without sending:
 
 ```bash
 money-machine mission-control-report-dry-run
 ```
 
-Then set the project-specific token and make the first submission explicitly (before the next
-scheduled worker cycle, when practical):
+Confirm Mission Control shows the project as `CURRENT`, with the expected period, status, metrics,
+and equity-derived P&L.
 
-```bash
-money-machine mission-control-report
-```
-
-The command prints only the delivered report ID and duplicate status. Confirm Mission Control shows
-the project as `CURRENT`, with the expected period, status, metrics, and equity-derived P&L.
-Automatic delivery begins on the next eligible scheduler cycle as soon as URL and token are
-configured; a race with the manual submission is harmless because HTTP 409 is treated as delivered.
+The wire contract is copied at [`business-performance-protocol.md`](./business-performance-protocol.md).

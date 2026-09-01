@@ -8,7 +8,6 @@ from uuid import uuid4
 import structlog
 
 from money_machine.adapters.alpaca_mcp import AlpacaMcpV2Adapter
-from money_machine.business_reporting import BusinessReportingOrchestrator
 from money_machine.domain.clock import FORCED_FLATTEN_STARTS_AT
 from money_machine.domain.enums import RunMode
 from money_machine.model_provider import DeterministicModelProvider, OpenAIModelProvider
@@ -33,7 +32,6 @@ async def run_scheduler(
             loop.add_signal_handler(signal_name, stop.set)
     owner = f"{socket.gethostname()}-{uuid4().hex[:10]}"
     service = AgentService(settings, repository)
-    business_reporting = BusinessReportingOrchestrator(settings, repository)
     model = _model(settings)
     broker_confirmed_flat = False
     async with AlpacaMcpV2Adapter(settings) as adapter:
@@ -62,10 +60,6 @@ async def run_scheduler(
                 )
                 broker_confirmed_flat = bool(
                     outcome.passport.get("account", {}).get("broker_confirmed_flat", False)
-                )
-                await asyncio.to_thread(
-                    business_reporting.report_if_due,
-                    now=datetime.now(UTC),
                 )
             if once:
                 return
