@@ -98,6 +98,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     async def dashboard(request: Request) -> HTMLResponse:
         now = datetime.now(UTC)
         summary = repository.dashboard_summary()
+        operational_state = repository.latest_operational_state()
         fingerprint = configured_account_fingerprint(app_settings)
         performance = repository.competition_performance_summary(
             account_fingerprint=fingerprint,
@@ -122,6 +123,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
                 "official_equity_locks_at": EOD_EQUITY_SNAPSHOT_AT.isoformat(),
                 "hackathon_ends_at": ENDS_AT.isoformat(),
                 "market_session": market_session_phase(now),
+                "entry_authority": _entry_authority(operational_state),
                 "refreshed_at": now.isoformat(),
             },
         )
@@ -264,7 +266,10 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
             heartbeat is not None and now - heartbeat <= timedelta(minutes=10)
         )
         reconciliation_ok = bool(state.get("reconciliation_clean", True))
-        healthy = database_ok and mcp_ok and heartbeat_ok and reconciliation_ok
+        kill_switch_active = bool(state.get("kill_switch_active", False))
+        healthy = (
+            database_ok and mcp_ok and heartbeat_ok and reconciliation_ok and not kill_switch_active
+        )
         payload: dict[str, Any] = {
             "status": "healthy" if healthy else "degraded",
             "database": "ok" if database_ok else "failed",
@@ -274,6 +279,8 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
             ),
             "reconciliation": "clean" if reconciliation_ok else "halted",
             "execution_state": state.get("execution_state", "observe_only"),
+            "kill_switch_active": kill_switch_active,
+            "entry_authority": _entry_authority(state, healthy=healthy),
             "market_session": market_session_phase(now),
             "timestamp": now.isoformat(),
         }
@@ -334,6 +341,19 @@ def _pct(value: Any) -> str:
         return f"{float(value) * 100:.2f}%"
     except (TypeError, ValueError):
         return "0.00%"
+
+
+def _entry_authority(state: dict[str, Any], *, healthy: bool = True) -> str:
+    if bool(state.get("kill_switch_active", False)):
+        return "entry_disabled"
+    if not healthy or not bool(state.get("reconciliation_clean", True)):
+        return "halted"
+    execution_state = str(state.get("execution_state", "observe_only"))
+    if execution_state == "full_execution":
+        return "enabled"
+    if execution_state == "observe_only":
+        return "observe_only"
+    return "entry_disabled"
 
 
 def _equity_chart(equities: list[Any], *, now: datetime) -> EquityChart:

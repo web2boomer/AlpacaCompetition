@@ -26,6 +26,26 @@ def test_account_api_returns_broker_state_without_caching(settings, database) ->
     }
 
 
+def test_account_api_coalesces_reads_inside_ten_second_cache(
+    settings, database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = 0
+
+    async def counted_account_read(_settings) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return {"status": "ok", "equity": "100420.00", "pnl": "420.00"}
+
+    monkeypatch.setattr("money_machine.web._broker_account_payload", counted_account_read)
+    with TestClient(create_app(settings, database)) as client:
+        first = client.get("/api/account")
+        second = client.get("/api/account")
+
+    assert first.status_code == second.status_code == 200
+    assert first.json() == second.json()
+    assert calls == 1
+
+
 def test_account_api_degrades_without_affecting_health(
     settings, database, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -72,6 +72,8 @@ def test_dashboard_and_health(settings, database) -> None:
     assert "const intervalMs = 10000" in response.text
     assert 'id="market-session-state"' in response.text
     assert "renderMarketSession(health.market_session)" in response.text
+    assert 'id="trading-availability"' in response.text
+    assert "renderTradingAvailability(health)" in response.text
     assert 'marketSession === "market_hours"' in response.text
     assert 'id="account-equity" data-baseline="100000" aria-live="polite"' in response.text
     assert 'id="account-equity-return"' in response.text
@@ -93,6 +95,13 @@ def test_dashboard_and_health(settings, database) -> None:
     assert liveness.json()["database"] == "ok"
     assert health.json()["database"] == "ok"
     assert health.json()["market_session"] in {"market_hours", "extended_hours", "overnight"}
+    assert health.json()["kill_switch_active"] is False
+    assert health.json()["entry_authority"] in {
+        "enabled",
+        "entry_disabled",
+        "observe_only",
+        "halted",
+    }
     assert passport.status_code == 200
     assert passport.json()["official"] is False
     assert activity.status_code == 200
@@ -100,6 +109,23 @@ def test_dashboard_and_health(settings, database) -> None:
     assert activity.json()["latest_run_id"] == passport.json()["run_id"]
     assert overnight.status_code == 200
     assert overnight.json()["status"] == "market_open"
+
+
+def test_kill_switch_is_prominent_and_degrades_health(settings, database) -> None:
+    app = create_app(settings, database)
+    with TestClient(app) as client:
+        app.state.repository.set_kill_switch(
+            active=True,
+            now=datetime(2026, 9, 1, 14, 30, tzinfo=UTC),
+        )
+        dashboard = client.get("/")
+        health = client.get("/api/health")
+
+    assert health.status_code == 503
+    assert health.json()["kill_switch_active"] is True
+    assert health.json()["entry_authority"] == "entry_disabled"
+    assert 'data-state="entry_disabled"' in dashboard.text
+    assert "Trading availability" in dashboard.text
 
 
 def test_equity_chart_spans_competition_start_to_now_with_daily_markers() -> None:

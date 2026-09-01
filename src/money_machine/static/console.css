@@ -11,6 +11,11 @@
 .builder-credit a:hover{color:var(--paper)}
 .live-indicator{display:flex;align-items:center;gap:8px;color:var(--acid)}
 .live-indicator i{width:7px;height:7px;border-radius:50%;background:var(--acid);box-shadow:0 0 14px var(--acid);animation:console-pulse 2s ease-in-out infinite}
+.trading-availability{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:100px;padding:5px 8px;color:var(--muted);font-weight:700;letter-spacing:.08em}
+.trading-availability strong{text-transform:uppercase}
+.trading-availability[data-state="enabled"]{color:var(--acid);border-color:rgba(184,255,96,.35)}
+.trading-availability[data-state="entry_disabled"],.trading-availability[data-state="halted"]{color:var(--red);border-color:rgba(255,123,102,.42);background:rgba(255,123,102,.08)}
+.trading-availability[data-state="observe_only"]{color:#d5b36c;border-color:rgba(213,179,108,.35)}
 @keyframes console-pulse{50%{opacity:.4;box-shadow:0 0 4px var(--acid)}}
 .ops-grid{display:grid;grid-template-columns:minmax(350px,.82fr) minmax(0,1.35fr);gap:18px;align-items:stretch}
 .overview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}

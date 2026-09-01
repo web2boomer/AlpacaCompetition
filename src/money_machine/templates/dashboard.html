@@ -23,6 +23,7 @@
     </span>
     <span class="refresh-meta">
       <span class="live-indicator" aria-live="polite"><i></i><strong id="connection-state">Live</strong></span>
+      <span class="trading-availability" id="trading-availability" data-state="{{ entry_authority }}" aria-live="polite">Trading availability · <strong id="trading-availability-label">{{ entry_authority|replace('_', ' ') }}</strong></span>
       <span class="builder-credit">Built by AOB · <a href="https://www.linkedin.com/in/alexobyrne">LinkedIn</a></span>
       <span>Last update <time id="last-updated" datetime="{{ refreshed_at }}">{{ refreshed_at }}</time></span>
     </span>
@@ -278,6 +279,8 @@
     const feed = document.getElementById("activity-feed");
     const updated = document.getElementById("last-updated");
     const connection = document.getElementById("connection-state");
+    const tradingAvailability = document.getElementById("trading-availability");
+    const tradingAvailabilityLabel = document.getElementById("trading-availability-label");
     const consoleGrid = document.querySelector(".ops-grid");
     const architectureLive = document.getElementById("architecture-live");
     const architectureStatus = document.getElementById("architecture-system-status");
@@ -307,6 +310,18 @@
       marketSessionState.dataset.session = marketSession;
       marketSessionLabel.textContent = labels[marketSession];
       if (marketSession === "market_hours") overnightEstimate.hidden = true;
+    };
+
+    const renderTradingAvailability = (health) => {
+      const states = {
+        enabled: "Enabled",
+        entry_disabled: "Entry disabled",
+        observe_only: "Observe only",
+        halted: "Halted"
+      };
+      const state = states[health.entry_authority] ? health.entry_authority : "halted";
+      tradingAvailability.dataset.state = state;
+      tradingAvailabilityLabel.textContent = states[state];
     };
 
     const setPnlTone = (element, pnl) => {
@@ -440,6 +455,7 @@
           activityResponse.json(), healthResponse.json()
         ]);
         renderMarketSession(health.market_session);
+        renderTradingAvailability(health);
         let accountFresh = false;
         try {
           if (!accountResponse?.ok) throw new Error("account unavailable");
