@@ -26,7 +26,7 @@ def test_dashboard_and_health(settings, database) -> None:
     assert "These are fixed safety checks, not model opinions" in response.text
     assert "How a decision becomes an audited order" in response.text
     assert 'id="architecture-system-status"' in response.text
-    assert "Status and timestamps refresh with the console every 15 seconds" in response.text
+    assert "Status and timestamps refresh with the console every 10 seconds" in response.text
     assert "Last update" in response.text
     assert "Official equity locks in" in response.text
     assert 'aria-label="Time remaining until official equity locks in"' in response.text
@@ -62,6 +62,10 @@ def test_dashboard_and_health(settings, database) -> None:
     assert "https://aob.io" in response.text
     assert '<header class="nav shell">' not in response.text
     assert "window.setInterval(refresh, intervalMs)" in response.text
+    assert "const intervalMs = 10000" in response.text
+    assert 'id="market-session-state"' in response.text
+    assert "renderMarketSession(health.market_session)" in response.text
+    assert 'marketSession === "market_hours"' in response.text
     assert 'id="account-equity" data-baseline="100000" aria-live="polite"' in response.text
     assert 'id="account-equity-return"' in response.text
     assert 'class="pnl-value positive"' in response.text
@@ -81,6 +85,7 @@ def test_dashboard_and_health(settings, database) -> None:
     assert liveness.status_code == 200
     assert liveness.json()["database"] == "ok"
     assert health.json()["database"] == "ok"
+    assert health.json()["market_session"] in {"market_hours", "extended_hours", "overnight"}
     assert passport.status_code == 200
     assert passport.json()["official"] is False
     assert activity.status_code == 200

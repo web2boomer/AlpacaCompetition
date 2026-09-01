@@ -15,3 +15,24 @@ For any material strategy or sizing recommendation, report:
 - how the result will be verified from the official competition account.
 
 The fixed development and production account mapping is recorded in `docs/COMPETITION_ACCOUNTS.md` and must not be changed during the scoring period.
+
+## Continuous production delivery
+
+Production uses continuous deployment. Every validated commit intended for `main` must be
+pushed and deployed promptly; do not leave completed production commits local or undeployed.
+
+For every production commit:
+
+- complete formatting, lint, strict typing, migration, and full test gates;
+- push the exact validated commit without force-pushing;
+- deploy the dashboard and scheduler at the exact same SHA;
+- when a database migration is included, deploy the dashboard first and require its pre-deploy
+  migration to succeed before deploying the scheduler;
+- verify both deploys are live, then verify the first ordinary production cycle for the official
+  account fingerprint, execution state, reconciliation, incidents, positions, working orders,
+  defined-loss totals, and service health; and
+- verify that deployment itself did not create, cancel, replace, or mutate broker orders or
+  positions.
+
+Escalate any blocker immediately rather than leaving production behind. Never manually alter
+positions or orders as part of deployment verification.

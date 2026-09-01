@@ -77,8 +77,7 @@
     <div class="metric-grid performance-control-grid" aria-label="Current agent metrics">
       <article class="metric-card">
         <div class="metric-label">Execution state</div>
-        <div class="metric-primary state"><i></i>{{ state.get('execution_state', 'observe_only')|replace('_', ' ') }}</div>
-        <p>{{ 'Reconciliation clean' if state.get('reconciliation_clean', True) else 'Entries halted by reconciliation' }}</p>
+        <div class="metric-primary state" id="market-session-state" data-session="{{ market_session }}"><i></i><span id="market-session-label">{{ market_session|replace('_', ' ') }}</span></div>
       </article>
       <article class="metric-card">
         <div class="metric-label">Latest decision</div>
@@ -225,7 +224,7 @@
         <div><dt>Order outcome</dt><dd>{{ execution.get('status', 'not submitted')|replace('_', ' ') }}</dd></div>
         <div><dt>Audit trail</dt><dd>{{ 'Passport sealed' if passport.get('run_id') else 'Awaiting cycle' }}</dd></div>
       </dl>
-      <div class="telemetry-note"><i></i><span>The illuminated path shows the active control loop. Status and timestamps refresh with the console every 15 seconds.</span></div>
+      <div class="telemetry-note"><i></i><span>The illuminated path shows the active control loop. Status and timestamps refresh with the console every 10 seconds.</span></div>
     </aside>
   </div>
 </section>
@@ -271,7 +270,7 @@
 {% block scripts %}
 <script>
   (() => {
-    const intervalMs = 15000;
+    const intervalMs = 10000;
     const feed = document.getElementById("activity-feed");
     const updated = document.getElementById("last-updated");
     const connection = document.getElementById("connection-state");
@@ -284,12 +283,27 @@
     const accountEquityDelta = document.getElementById("account-equity-delta");
     const accountEquityReturn = document.getElementById("account-equity-return");
     const equitySourceState = document.getElementById("equity-source-state");
+    const marketSessionState = document.getElementById("market-session-state");
+    const marketSessionLabel = document.getElementById("market-session-label");
     const overnightEstimate = document.getElementById("overnight-estimate");
     const overnightChange = document.getElementById("overnight-change");
     const overnightEquity = document.getElementById("overnight-equity");
     const overnightUnderlyings = document.getElementById("overnight-underlyings");
     const overnightExplanation = document.getElementById("overnight-explanation");
     const currency = new Intl.NumberFormat("en-US", {style: "currency", currency: "USD"});
+    let marketSession = marketSessionState.dataset.session;
+
+    const renderMarketSession = (session) => {
+      const labels = {
+        market_hours: "Market hours",
+        extended_hours: "Extended hours",
+        overnight: "Overnight"
+      };
+      marketSession = labels[session] ? session : "overnight";
+      marketSessionState.dataset.session = marketSession;
+      marketSessionLabel.textContent = labels[marketSession];
+      if (marketSession === "market_hours") overnightEstimate.hidden = true;
+    };
 
     const setPnlTone = (element, pnl) => {
       if (!element) return;
@@ -325,7 +339,7 @@
     };
 
     const renderOvernightEstimate = (payload) => {
-      if (!payload || payload.status === "market_open" || payload.status === "not_applicable") {
+      if (marketSession === "market_hours" || !payload || payload.status === "market_open" || payload.status === "not_applicable") {
         overnightEstimate.hidden = true;
         return;
       }
@@ -413,12 +427,15 @@
           fetch("/api/activity", {cache: "no-store"}),
           fetch("/api/health", {cache: "no-store"}),
           fetch("/api/account", {cache: "no-store"}).catch(() => null),
-          fetch("/api/overnight-estimate", {cache: "no-store"}).catch(() => null)
+          marketSession === "market_hours"
+            ? Promise.resolve(null)
+            : fetch("/api/overnight-estimate", {cache: "no-store"}).catch(() => null)
         ]);
         if (!activityResponse.ok) throw new Error("activity unavailable");
         const [payload, health] = await Promise.all([
           activityResponse.json(), healthResponse.json()
         ]);
+        renderMarketSession(health.market_session);
         let accountFresh = false;
         try {
           if (!accountResponse?.ok) throw new Error("account unavailable");
@@ -455,6 +472,7 @@
     };
 
     setUpdated(updated.dateTime);
+    renderMarketSession(marketSession);
     renderCountdown();
     refresh();
     window.setInterval(renderCountdown, 1000);

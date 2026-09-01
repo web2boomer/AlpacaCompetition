@@ -1,7 +1,8 @@
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from decimal import Decimal
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from money_machine.domain.enums import ExecutionState
 
@@ -17,6 +18,8 @@ ENDS_AT = datetime(2026, 9, 4, 13, 30, tzinfo=UTC)
 BASELINE_EQUITY = Decimal("100000.00")
 
 ScoringWindowState = Literal["pre_scoring", "scoring", "eod_measurement", "post_scoring"]
+MarketSessionPhase = Literal["market_hours", "extended_hours", "overnight"]
+NEW_YORK = ZoneInfo("America/New_York")
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +49,20 @@ def scoring_window_state(at: datetime) -> ScoringWindowState:
 
 def is_official_performance_observation(at: datetime) -> bool:
     return scoring_window_state(at) in {"scoring", "eod_measurement"}
+
+
+def market_session_phase(at: datetime) -> MarketSessionPhase:
+    if at.tzinfo is None or at.utcoffset() is None:
+        raise ValueError("market session requires a timezone-aware timestamp")
+    local = at.astimezone(NEW_YORK)
+    if local.weekday() >= 5:
+        return "overnight"
+    wall_time = local.time().replace(tzinfo=None)
+    if time(9, 30) <= wall_time < time(16):
+        return "market_hours"
+    if time(4) <= wall_time < time(9, 30) or time(16) <= wall_time < time(20):
+        return "extended_hours"
+    return "overnight"
 
 
 def competition_clock(at: datetime, *, has_exposure: bool) -> CompetitionClockSnapshot:

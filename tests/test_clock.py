@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -11,6 +11,7 @@ from money_machine.domain.clock import (
     SCORING_STARTS_AT,
     competition_clock,
     is_official_performance_observation,
+    market_session_phase,
 )
 from money_machine.domain.enums import ExecutionState
 
@@ -104,3 +105,17 @@ def test_authoritative_equity_lock_precedes_formal_hackathon_end() -> None:
     assert EOD_EQUITY_SNAPSHOT_AT.isoformat() == "2026-09-03T20:00:00+00:00"
     assert ENDS_AT.isoformat() == "2026-09-04T13:30:00+00:00"
     assert EOD_EQUITY_SNAPSHOT_AT < ENDS_AT
+
+
+@pytest.mark.parametrize(
+    ("moment", "phase"),
+    [
+        (datetime(2026, 9, 1, 13, 29, tzinfo=UTC), "extended_hours"),
+        (datetime(2026, 9, 1, 13, 30, tzinfo=UTC), "market_hours"),
+        (datetime(2026, 9, 1, 20, 0, tzinfo=UTC), "extended_hours"),
+        (datetime(2026, 9, 2, 0, 0, tzinfo=UTC), "overnight"),
+        (datetime(2026, 9, 5, 14, 0, tzinfo=UTC), "overnight"),
+    ],
+)
+def test_market_session_phase(moment, phase) -> None:
+    assert market_session_phase(moment) == phase

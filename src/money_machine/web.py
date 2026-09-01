@@ -15,7 +15,12 @@ from fastapi.templating import Jinja2Templates
 from money_machine.adapters.alpaca_mcp import AlpacaMcpV2Adapter, parse_occ_symbol
 from money_machine.adapters.replay import ReplayAlpacaAdapter
 from money_machine.business_reporting import PROJECT, BusinessReportBuilder
-from money_machine.domain.clock import BASELINE_EQUITY, ENDS_AT, EOD_EQUITY_SNAPSHOT_AT
+from money_machine.domain.clock import (
+    BASELINE_EQUITY,
+    ENDS_AT,
+    EOD_EQUITY_SNAPSHOT_AT,
+    market_session_phase,
+)
 from money_machine.domain.enums import RunMode
 from money_machine.model_provider import ReplayModelProvider
 from money_machine.overnight import provisional_overnight_mark
@@ -98,6 +103,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
                 "replay_enabled": app_settings.run_mode is RunMode.REPLAY,
                 "official_equity_locks_at": EOD_EQUITY_SNAPSHOT_AT.isoformat(),
                 "hackathon_ends_at": ENDS_AT.isoformat(),
+                "market_session": market_session_phase(datetime.now(UTC)),
                 "refreshed_at": datetime.now(UTC).isoformat(),
             },
         )
@@ -250,6 +256,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
             ),
             "reconciliation": "clean" if reconciliation_ok else "halted",
             "execution_state": state.get("execution_state", "observe_only"),
+            "market_session": market_session_phase(now),
             "timestamp": now.isoformat(),
         }
         return JSONResponse(payload, status_code=200 if healthy else 503)
