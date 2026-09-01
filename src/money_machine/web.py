@@ -2,6 +2,7 @@ import asyncio
 import hmac
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,8 @@ from money_machine.domain.clock import (
     BASELINE_EQUITY,
     ENDS_AT,
     EOD_EQUITY_SNAPSHOT_AT,
+    NEW_YORK,
+    SCORING_STARTS_AT,
     market_session_phase,
 )
 from money_machine.domain.enums import RunMode
@@ -36,6 +39,20 @@ ACCOUNT_CACHE_SECONDS = 10
 ACCOUNT_READ_TIMEOUT_SECONDS = 12
 OVERNIGHT_CACHE_SECONDS = 60
 logger = structlog.get_logger()
+
+
+@dataclass(frozen=True, slots=True)
+class EquityChartMarker:
+    x: float
+    label: str
+
+
+@dataclass(frozen=True, slots=True)
+class EquityChart:
+    points: str
+    day_markers: tuple[EquityChartMarker, ...]
+    start_label: str
+    end_label: str
 
 
 def create_app(settings: Settings | None = None, database: Database | None = None) -> FastAPI:
@@ -79,11 +96,12 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request) -> HTMLResponse:
+        now = datetime.now(UTC)
         summary = repository.dashboard_summary()
         fingerprint = configured_account_fingerprint(app_settings)
         performance = repository.competition_performance_summary(
             account_fingerprint=fingerprint,
-            now=datetime.now(UTC),
+            now=now,
         )
         summary["performance"] = performance
         official_curve = repository.official_equity_curve(account_fingerprint=fingerprint)
@@ -91,7 +109,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
             summary["equities"] = official_curve
             summary["latest_equity"] = official_curve[-1]
         passport = summary.get("latest_passport") or {}
-        chart = _equity_chart(summary.get("equities", []))
+        chart = _equity_chart(summary.get("equities", []), now=now)
         return templates.TemplateResponse(
             request,
             "dashboard.html",
@@ -103,8 +121,8 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
                 "replay_enabled": app_settings.run_mode is RunMode.REPLAY,
                 "official_equity_locks_at": EOD_EQUITY_SNAPSHOT_AT.isoformat(),
                 "hackathon_ends_at": ENDS_AT.isoformat(),
-                "market_session": market_session_phase(datetime.now(UTC)),
-                "refreshed_at": datetime.now(UTC).isoformat(),
+                "market_session": market_session_phase(now),
+                "refreshed_at": now.isoformat(),
             },
         )
 
@@ -318,25 +336,59 @@ def _pct(value: Any) -> str:
         return "0.00%"
 
 
-def _equity_chart(equities: list[Any]) -> str:
-    values = [float(snapshot.equity) for snapshot in equities]
-    if not values:
-        values = [100000.0]
-    if len(values) == 1:
-        values.insert(0, 100000.0)
+def _equity_chart(equities: list[Any], *, now: datetime) -> EquityChart:
     width, height, padding = 720, 180, 12
+    chart_end = min(
+        max(_aware(now) or SCORING_STARTS_AT, SCORING_STARTS_AT), EOD_EQUITY_SNAPSHOT_AT
+    )
+    observations = sorted(
+        (
+            (observed_at, float(snapshot.equity))
+            for snapshot in equities
+            if (observed_at := _aware(getattr(snapshot, "observed_at", None))) is not None
+            and SCORING_STARTS_AT <= observed_at <= chart_end
+        ),
+        key=lambda item: item[0],
+    )
+    series = [(SCORING_STARTS_AT, float(BASELINE_EQUITY)), *observations]
+    if series[-1][0] < chart_end:
+        series.append((chart_end, series[-1][1]))
+    values = [value for _, value in series]
     low, high = min(values), max(values)
     span = high - low
     points = []
-    for index, value in enumerate(values):
-        x = padding + index * ((width - 2 * padding) / (len(values) - 1))
+    duration = max((chart_end - SCORING_STARTS_AT).total_seconds(), 1.0)
+    for observed_at, value in series:
+        elapsed = max((observed_at - SCORING_STARTS_AT).total_seconds(), 0.0)
+        x = padding + (elapsed / duration) * (width - 2 * padding)
         y = (
             height / 2
             if span == 0
             else height - padding - ((value - low) / span) * (height - 2 * padding)
         )
         points.append(f"{x:.1f},{y:.1f}")
-    return " ".join(points)
+
+    markers: list[EquityChartMarker] = []
+    local_start = SCORING_STARTS_AT.astimezone(NEW_YORK)
+    next_midnight = (local_start + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    while next_midnight.astimezone(UTC) < chart_end:
+        marker_at = next_midnight.astimezone(UTC)
+        elapsed = (marker_at - SCORING_STARTS_AT).total_seconds()
+        x = padding + (elapsed / duration) * (width - 2 * padding)
+        markers.append(EquityChartMarker(x=round(x, 1), label=next_midnight.strftime("%a %b %-d")))
+        next_midnight += timedelta(days=1)
+
+    latest_at = observations[-1][0] if observations else SCORING_STARTS_AT
+    return EquityChart(
+        points=" ".join(points),
+        day_markers=tuple(markers),
+        start_label="Competition start · Aug 31 9:30 ET",
+        end_label=(
+            f"Now · last audit {latest_at.astimezone(NEW_YORK).strftime('%b %-d %-I:%M %p')} ET"
+        ),
+    )
 
 
 def _aware(value: Any) -> datetime | None:

@@ -54,12 +54,16 @@
       <div class="overnight-underlyings" id="overnight-underlyings"></div>
       <p id="overnight-explanation">Based on closing option deltas and extended-hours ETF moves. Not an executable option quote.</p>
     </aside>
-    <svg class="equity-chart ops-equity-chart" viewBox="0 0 720 180" role="img" aria-label="Paper-account equity curve">
+    <svg class="equity-chart ops-equity-chart" viewBox="0 0 720 180" role="img" aria-label="Paper-account equity performance from the competition start through now">
       <defs><linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b8ff60" stop-opacity=".32"/><stop offset="1" stop-color="#b8ff60" stop-opacity="0"/></linearGradient></defs>
-      <path d="M 12 168 L {{ chart }} L 708 168 Z" fill="url(#area)"/>
-      <polyline points="{{ chart }}" fill="none" stroke="#b8ff60" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      {% for marker in chart.day_markers %}
+      <line class="equity-day-line" x1="{{ marker.x }}" y1="12" x2="{{ marker.x }}" y2="168"/>
+      <text class="equity-day-label" x="{{ marker.x + 5 }}" y="22">{{ marker.label }}</text>
+      {% endfor %}
+      <path d="M 12 168 L {{ chart.points }} L 708 168 Z" fill="url(#area)"/>
+      <polyline points="{{ chart.points }}" fill="none" stroke="#b8ff60" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
-    <div class="chart-axis"><span>Competition baseline</span><span>Latest audited cycle</span></div>
+    <div class="chart-axis"><span>{{ chart.start_label }}</span><span>{{ chart.end_label }}</span></div>
   </article>
   <article class="panel performance-overview" aria-labelledby="performance-title">
     <div class="panel-head">

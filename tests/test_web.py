@@ -1,14 +1,16 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from sqlalchemy import desc, select
 
+from money_machine.domain.clock import SCORING_STARTS_AT
 from money_machine.domain.enums import RunMode
 from money_machine.persistence.models import AgentRunORM, EquitySnapshotORM
 from money_machine.persistence.repository import AuditRepository
-from money_machine.web import create_app
+from money_machine.web import _equity_chart, create_app
 
 
 def test_dashboard_and_health(settings, database) -> None:
@@ -45,6 +47,11 @@ def test_dashboard_and_health(settings, database) -> None:
     assert "https://www.linkedin.com/in/alexobyrne" in response.text
     assert 'class="shell ops-grid overview-grid"' in response.text
     assert 'class="panel performance-overview"' in response.text
+    assert (
+        "Paper-account equity performance from the competition start through now" in response.text
+    )
+    assert "Competition start · Aug 31 9:30 ET" in response.text
+    assert 'class="equity-day-line"' in response.text
     assert 'class="decision-left-stack"' in response.text
     assert 'class="shell gate-section section-gap"' in response.text
     assert "Starting equity" not in response.text
@@ -93,6 +100,36 @@ def test_dashboard_and_health(settings, database) -> None:
     assert activity.json()["latest_run_id"] == passport.json()["run_id"]
     assert overnight.status_code == 200
     assert overnight.json()["status"] == "market_open"
+
+
+def test_equity_chart_spans_competition_start_to_now_with_daily_markers() -> None:
+    now = SCORING_STARTS_AT + timedelta(days=2, hours=2)
+    chart = _equity_chart(
+        [
+            SimpleNamespace(
+                observed_at=SCORING_STARTS_AT - timedelta(minutes=1), equity=Decimal("1.00")
+            ),
+            SimpleNamespace(
+                observed_at=SCORING_STARTS_AT + timedelta(hours=1),
+                equity=Decimal("100100.00"),
+            ),
+            SimpleNamespace(
+                observed_at=SCORING_STARTS_AT + timedelta(days=1, hours=12),
+                equity=Decimal("100250.00"),
+            ),
+            SimpleNamespace(observed_at=now + timedelta(minutes=1), equity=Decimal("1.00")),
+        ],
+        now=now,
+    )
+
+    assert chart.points.split()[0].startswith("12.0,")
+    assert chart.points.split()[-1].startswith("708.0,")
+    assert len(chart.day_markers) == 2
+    assert [marker.label for marker in chart.day_markers] == ["Tue Sep 1", "Wed Sep 2"]
+    assert chart.day_markers[0].x < chart.day_markers[1].x
+    assert chart.start_label == "Competition start · Aug 31 9:30 ET"
+    assert chart.end_label == "Now · last audit Sep 1 9:30 PM ET"
+    assert "1.0," not in chart.points
 
 
 def test_cash_retained_activity_explains_why(settings, database) -> None:

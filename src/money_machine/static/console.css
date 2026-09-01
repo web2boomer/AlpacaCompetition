@@ -13,7 +13,7 @@
 .live-indicator i{width:7px;height:7px;border-radius:50%;background:var(--acid);box-shadow:0 0 14px var(--acid);animation:console-pulse 2s ease-in-out infinite}
 @keyframes console-pulse{50%{opacity:.4;box-shadow:0 0 4px var(--acid)}}
 .ops-grid{display:grid;grid-template-columns:minmax(350px,.82fr) minmax(0,1.35fr);gap:18px;align-items:stretch}
-.overview-grid{grid-template-columns:minmax(300px,.7fr) minmax(0,1.45fr)}
+.overview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 .activity-panel{padding:0;overflow:hidden;min-height:390px}
 .activity-head{padding:24px 24px 18px}
 .activity-head h2{font-size:20px;margin:7px 0 0}
@@ -53,6 +53,8 @@
 .overnight-underlyings .negative{color:var(--red)}
 .overnight-estimate p{margin:9px 0 0;color:var(--muted);font-size:8px;line-height:1.45}
 .ops-equity-chart{height:205px;flex:1;min-height:180px}
+.equity-day-line{stroke:rgba(255,255,255,.18);stroke-width:1;stroke-dasharray:3 5}
+.equity-day-label{fill:#88918c;font:8px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.05em;text-transform:uppercase}
 .ops-metrics{margin-top:18px}
 .performance-overview{min-height:390px;padding-bottom:24px}
 .performance-grid{grid-template-columns:repeat(2,minmax(0,1fr));border-bottom:0}
