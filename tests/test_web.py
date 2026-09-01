@@ -128,7 +128,7 @@ def test_kill_switch_is_prominent_and_degrades_health(settings, database) -> Non
     assert "Trading availability" in dashboard.text
 
 
-def test_equity_chart_spans_competition_start_to_now_with_daily_markers() -> None:
+def test_equity_chart_shows_only_trading_sessions_with_daily_markers() -> None:
     now = SCORING_STARTS_AT + timedelta(days=2, hours=2)
     chart = _equity_chart(
         [
@@ -150,11 +150,14 @@ def test_equity_chart_spans_competition_start_to_now_with_daily_markers() -> Non
 
     assert chart.points.split()[0].startswith("12.0,")
     assert chart.points.split()[-1].startswith("708.0,")
+    assert len(chart.points.split()) == 3
     assert len(chart.day_markers) == 2
     assert [marker.label for marker in chart.day_markers] == ["Tue Sep 1", "Wed Sep 2"]
     assert chart.day_markers[0].x < chart.day_markers[1].x
+    assert chart.day_markers[0].x > 300
     assert chart.start_label == "Competition start · Aug 31 9:30 ET"
-    assert chart.end_label == "Now · last audit Sep 1 9:30 PM ET"
+    assert chart.end_label == "Now · last audit Aug 31 10:30 AM ET"
+    assert chart.peak_equity == 100100.0
     assert "1.0," not in chart.points
     assert chart.anomalies == ()
 

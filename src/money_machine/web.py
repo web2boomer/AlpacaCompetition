@@ -3,7 +3,7 @@ import hmac
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -374,7 +374,7 @@ def _equity_chart(equities: list[Any], *, now: datetime) -> EquityChart:
     chart_end = min(
         max(_aware(now) or SCORING_STARTS_AT, SCORING_STARTS_AT), EOD_EQUITY_SNAPSHOT_AT
     )
-    observations = sorted(
+    audit_observations = sorted(
         (
             (observed_at, float(snapshot.equity))
             for snapshot in equities
@@ -383,10 +383,20 @@ def _equity_chart(equities: list[Any], *, now: datetime) -> EquityChart:
         ),
         key=lambda item: item[0],
     )
+    anomalous_timestamps = {
+        audit_observations[index][0]
+        for index in range(1, len(audit_observations) - 1)
+        if _isolated_opening_mark_anomaly(audit_observations, index)
+    }
+    observations = [
+        observation
+        for observation in audit_observations
+        if _is_regular_market_observation(observation[0])
+    ]
     anomalous_indexes = {
         index
-        for index in range(1, len(observations) - 1)
-        if _isolated_opening_mark_anomaly(observations, index)
+        for index, observation in enumerate(observations)
+        if observation[0] in anomalous_timestamps
     }
     clean_observations = [
         observation
@@ -400,9 +410,9 @@ def _equity_chart(equities: list[Any], *, now: datetime) -> EquityChart:
     low, high = min(values), max(values)
     span = high - low
     points = []
-    duration = max((chart_end - SCORING_STARTS_AT).total_seconds(), 1.0)
+    duration = max(_trading_elapsed_seconds(chart_end), 1.0)
     for observed_at, value in series:
-        elapsed = max((observed_at - SCORING_STARTS_AT).total_seconds(), 0.0)
+        elapsed = _trading_elapsed_seconds(observed_at)
         x = padding + (elapsed / duration) * (width - 2 * padding)
         y = (
             height / 2
@@ -414,7 +424,7 @@ def _equity_chart(equities: list[Any], *, now: datetime) -> EquityChart:
     anomalies: list[EquityChartAnomaly] = []
     for index in sorted(anomalous_indexes):
         observed_at, value = observations[index]
-        elapsed = max((observed_at - SCORING_STARTS_AT).total_seconds(), 0.0)
+        elapsed = _trading_elapsed_seconds(observed_at)
         x = padding + (elapsed / duration) * (width - 2 * padding)
         raw_y = (
             height / 2
@@ -435,15 +445,18 @@ def _equity_chart(equities: list[Any], *, now: datetime) -> EquityChart:
 
     markers: list[EquityChartMarker] = []
     local_start = SCORING_STARTS_AT.astimezone(NEW_YORK)
-    next_midnight = (local_start + timedelta(days=1)).replace(
-        hour=0, minute=0, second=0, microsecond=0
+    next_session = (local_start + timedelta(days=1)).replace(
+        hour=9, minute=30, second=0, microsecond=0
     )
-    while next_midnight.astimezone(UTC) < chart_end:
-        marker_at = next_midnight.astimezone(UTC)
-        elapsed = (marker_at - SCORING_STARTS_AT).total_seconds()
+    while next_session.astimezone(UTC) < chart_end:
+        if next_session.weekday() >= 5:
+            next_session += timedelta(days=1)
+            continue
+        marker_at = next_session.astimezone(UTC)
+        elapsed = _trading_elapsed_seconds(marker_at)
         x = padding + (elapsed / duration) * (width - 2 * padding)
-        markers.append(EquityChartMarker(x=round(x, 1), label=next_midnight.strftime("%a %b %-d")))
-        next_midnight += timedelta(days=1)
+        markers.append(EquityChartMarker(x=round(x, 1), label=next_session.strftime("%a %b %-d")))
+        next_session += timedelta(days=1)
 
     latest_at = observations[-1][0] if observations else SCORING_STARTS_AT
     peak = float(BASELINE_EQUITY)
@@ -463,6 +476,31 @@ def _equity_chart(equities: list[Any], *, now: datetime) -> EquityChart:
         maximum_drawdown=maximum_drawdown,
         maximum_drawdown_percent=(maximum_drawdown / peak * 100 if peak else 0.0),
     )
+
+
+def _is_regular_market_observation(at: datetime) -> bool:
+    local = at.astimezone(NEW_YORK)
+    wall_time = local.time().replace(tzinfo=None)
+    return local.weekday() < 5 and time(9, 30) <= wall_time <= time(16)
+
+
+def _trading_elapsed_seconds(at: datetime) -> float:
+    target = min(max(at.astimezone(UTC), SCORING_STARTS_AT), EOD_EQUITY_SNAPSHOT_AT)
+    target_local = target.astimezone(NEW_YORK)
+    scoring_start_local = SCORING_STARTS_AT.astimezone(NEW_YORK)
+    equity_lock_local = EOD_EQUITY_SNAPSHOT_AT.astimezone(NEW_YORK)
+    session_date = scoring_start_local.date()
+    total = 0.0
+    while session_date <= target_local.date():
+        if session_date.weekday() < 5:
+            session_open = datetime.combine(session_date, time(9, 30), tzinfo=NEW_YORK)
+            session_close = datetime.combine(session_date, time(16), tzinfo=NEW_YORK)
+            session_open = max(session_open, scoring_start_local)
+            session_close = min(session_close, equity_lock_local)
+            if target_local > session_open:
+                total += max((min(target_local, session_close) - session_open).total_seconds(), 0.0)
+        session_date += timedelta(days=1)
+    return total
 
 
 def _isolated_opening_mark_anomaly(observations: list[tuple[datetime, float]], index: int) -> bool:
