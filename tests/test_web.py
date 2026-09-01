@@ -156,6 +156,24 @@ def test_equity_chart_spans_competition_start_to_now_with_daily_markers() -> Non
     assert chart.start_label == "Competition start · Aug 31 9:30 ET"
     assert chart.end_label == "Now · last audit Sep 1 9:30 PM ET"
     assert "1.0," not in chart.points
+    assert chart.anomalies == ()
+
+
+def test_equity_chart_quarantines_isolated_opening_mark_without_deleting_audit() -> None:
+    opening = datetime(2026, 9, 1, 13, 30, tzinfo=UTC)
+    chart = _equity_chart(
+        [
+            SimpleNamespace(observed_at=opening - timedelta(minutes=5), equity=Decimal("99948.52")),
+            SimpleNamespace(observed_at=opening, equity=Decimal("95849.52")),
+            SimpleNamespace(observed_at=opening + timedelta(minutes=5), equity=Decimal("99642.32")),
+        ],
+        now=opening + timedelta(minutes=10),
+    )
+
+    assert len(chart.anomalies) == 1
+    assert "$95,849.52" in chart.anomalies[0].label
+    assert "95849.52" not in chart.points
+    assert chart.maximum_drawdown < 1000
 
 
 def test_cash_retained_activity_explains_why(settings, database) -> None:

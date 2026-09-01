@@ -48,11 +48,22 @@ class EquityChartMarker:
 
 
 @dataclass(frozen=True, slots=True)
+class EquityChartAnomaly:
+    x: float
+    y: float
+    label: str
+
+
+@dataclass(frozen=True, slots=True)
 class EquityChart:
     points: str
     day_markers: tuple[EquityChartMarker, ...]
+    anomalies: tuple[EquityChartAnomaly, ...]
     start_label: str
     end_label: str
+    peak_equity: float
+    maximum_drawdown: float
+    maximum_drawdown_percent: float
 
 
 def create_app(settings: Settings | None = None, database: Database | None = None) -> FastAPI:
@@ -370,7 +381,17 @@ def _equity_chart(equities: list[Any], *, now: datetime) -> EquityChart:
         ),
         key=lambda item: item[0],
     )
-    series = [(SCORING_STARTS_AT, float(BASELINE_EQUITY)), *observations]
+    anomalous_indexes = {
+        index
+        for index in range(1, len(observations) - 1)
+        if _isolated_opening_mark_anomaly(observations, index)
+    }
+    clean_observations = [
+        observation
+        for index, observation in enumerate(observations)
+        if index not in anomalous_indexes
+    ]
+    series = [(SCORING_STARTS_AT, float(BASELINE_EQUITY)), *clean_observations]
     if series[-1][0] < chart_end:
         series.append((chart_end, series[-1][1]))
     values = [value for _, value in series]
@@ -388,6 +409,28 @@ def _equity_chart(equities: list[Any], *, now: datetime) -> EquityChart:
         )
         points.append(f"{x:.1f},{y:.1f}")
 
+    anomalies: list[EquityChartAnomaly] = []
+    for index in sorted(anomalous_indexes):
+        observed_at, value = observations[index]
+        elapsed = max((observed_at - SCORING_STARTS_AT).total_seconds(), 0.0)
+        x = padding + (elapsed / duration) * (width - 2 * padding)
+        raw_y = (
+            height / 2
+            if span == 0
+            else height - padding - ((value - low) / span) * (height - 2 * padding)
+        )
+        anomalies.append(
+            EquityChartAnomaly(
+                x=round(x, 1),
+                y=round(min(max(raw_y, padding), height - padding), 1),
+                label=(
+                    f"Quarantined raw broker mark · "
+                    f"{observed_at.astimezone(NEW_YORK).strftime('%b %-d %-I:%M %p')} ET · "
+                    f"${value:,.2f}"
+                ),
+            )
+        )
+
     markers: list[EquityChartMarker] = []
     local_start = SCORING_STARTS_AT.astimezone(NEW_YORK)
     next_midnight = (local_start + timedelta(days=1)).replace(
@@ -401,13 +444,39 @@ def _equity_chart(equities: list[Any], *, now: datetime) -> EquityChart:
         next_midnight += timedelta(days=1)
 
     latest_at = observations[-1][0] if observations else SCORING_STARTS_AT
+    peak = float(BASELINE_EQUITY)
+    maximum_drawdown = 0.0
+    for _, value in series:
+        peak = max(peak, value)
+        maximum_drawdown = max(maximum_drawdown, peak - value)
     return EquityChart(
         points=" ".join(points),
         day_markers=tuple(markers),
+        anomalies=tuple(anomalies),
         start_label="Competition start · Aug 31 9:30 ET",
         end_label=(
             f"Now · last audit {latest_at.astimezone(NEW_YORK).strftime('%b %-d %-I:%M %p')} ET"
         ),
+        peak_equity=peak,
+        maximum_drawdown=maximum_drawdown,
+        maximum_drawdown_percent=(maximum_drawdown / peak * 100 if peak else 0.0),
+    )
+
+
+def _isolated_opening_mark_anomaly(observations: list[tuple[datetime, float]], index: int) -> bool:
+    observed_at, value = observations[index]
+    local = observed_at.astimezone(NEW_YORK)
+    previous_at, previous = observations[index - 1]
+    following_at, following = observations[index + 1]
+    baseline = max(previous, following, 1.0)
+    return (
+        local.hour == 9
+        and local.minute == 30
+        and observed_at - previous_at <= timedelta(minutes=10)
+        and following_at - observed_at <= timedelta(minutes=10)
+        and abs(previous - following) / baseline <= 0.01
+        and (previous - value) / baseline >= 0.02
+        and (following - value) / baseline >= 0.02
     )
 
 

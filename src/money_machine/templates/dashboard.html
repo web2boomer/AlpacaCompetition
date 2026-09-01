@@ -61,10 +61,14 @@
       <line class="equity-day-line" x1="{{ marker.x }}" y1="12" x2="{{ marker.x }}" y2="168"/>
       <text class="equity-day-label" x="{{ marker.x + 5 }}" y="22">{{ marker.label }}</text>
       {% endfor %}
+      {% for anomaly in chart.anomalies %}
+      <circle class="equity-anomaly" cx="{{ anomaly.x }}" cy="{{ anomaly.y }}" r="5"><title>{{ anomaly.label }}</title></circle>
+      {% endfor %}
       <path d="M 12 168 L {{ chart.points }} L 708 168 Z" fill="url(#area)"/>
       <polyline points="{{ chart.points }}" fill="none" stroke="#b8ff60" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
     <div class="chart-axis"><span>{{ chart.start_label }}</span><span>{{ chart.end_label }}</span></div>
+    {% if chart.anomalies %}<p class="equity-anomaly-note">Raw 9:30 broker mark retained in the audit trail and flagged here; excluded from the performance line and display drawdown because adjacent audited marks immediately recovered.</p>{% endif %}
   </article>
   <article class="panel performance-overview" aria-labelledby="performance-title">
     <div class="panel-head">
@@ -73,7 +77,7 @@
     </div>
     {% if performance.get('available') %}
     <div class="metric-grid ops-metrics performance-grid" aria-label="Verified account metrics">
-      <article class="metric-card"><div class="metric-label">Peak / max drawdown</div><div class="metric-primary">{{ performance.peak_equity|money }}</div><p>{{ performance.maximum_drawdown|money }} · {{ performance.maximum_drawdown_percent }}%</p></article>
+      <article class="metric-card"><div class="metric-label">Peak / mark-quality-adjusted drawdown</div><div class="metric-primary">{{ chart.peak_equity|money }}</div><p>{{ chart.maximum_drawdown|money }} · {{ '%.4f'|format(chart.maximum_drawdown_percent) }}%</p></article>
       <article class="metric-card"><div class="metric-label">Broker exposure</div><div class="metric-primary">{{ performance.open_position_count }} positions</div><p>{{ performance.working_order_count }} working orders</p></article>
     </div>
     {% else %}
