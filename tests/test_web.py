@@ -43,8 +43,10 @@ def test_dashboard_and_health(settings, database) -> None:
     assert "Official competition performance" not in response.text
     assert "Verified account evidence" not in response.text
     assert "Updates every 15 seconds" not in response.text
-    assert "Built by AOB" in response.text
-    assert "https://www.linkedin.com/in/alexobyrne" in response.text
+    assert "BUILT BY WEB2BOOMER" in response.text
+    assert 'href="https://webtwoboomer.com/"' in response.text
+    assert "Built by AOB" not in response.text
+    assert "linkedin.com" not in response.text
     assert 'class="shell ops-grid overview-grid"' in response.text
     assert 'class="panel performance-overview"' in response.text
     assert (
@@ -52,6 +54,11 @@ def test_dashboard_and_health(settings, database) -> None:
     )
     assert "Competition start · Aug 31 9:30 ET" in response.text
     assert 'class="equity-day-line"' in response.text
+    assert 'class="equity-baseline-line"' in response.text
+    assert 'class="equity-baseline-label"' in response.text
+    assert "$100,000</text>" in response.text
+    assert "Raw 9:30 broker mark" not in response.text
+    assert 'class="equity-anomaly"' not in response.text
     assert 'class="decision-left-stack"' in response.text
     assert 'class="shell gate-section section-gap"' in response.text
     assert "Starting equity" not in response.text
@@ -158,6 +165,7 @@ def test_equity_chart_shows_only_trading_sessions_with_daily_markers() -> None:
     assert chart.start_label == "Competition start · Aug 31 9:30 ET"
     assert chart.end_label == "Now · last audit Aug 31 10:30 AM ET"
     assert chart.peak_equity == 100100.0
+    assert 12 <= chart.baseline_y <= 168
     assert "1.0," not in chart.points
     assert chart.anomalies == ()
 

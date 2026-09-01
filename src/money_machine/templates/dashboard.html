@@ -24,7 +24,7 @@
     <span class="refresh-meta">
       <span class="live-indicator" aria-live="polite"><i></i><strong id="connection-state">Live</strong></span>
       <span class="trading-availability" id="trading-availability" data-state="{{ entry_authority }}" aria-live="polite">Trading availability · <strong id="trading-availability-label">{{ entry_authority|replace('_', ' ') }}</strong></span>
-      <span class="builder-credit">Built by AOB · <a href="https://www.linkedin.com/in/alexobyrne">LinkedIn</a></span>
+      <span class="builder-credit"><a href="https://webtwoboomer.com/">BUILT BY WEB2BOOMER</a></span>
       <span>Last update <time id="last-updated" datetime="{{ refreshed_at }}">{{ refreshed_at }}</time></span>
     </span>
   </div>
@@ -61,14 +61,12 @@
       <line class="equity-day-line" x1="{{ marker.x }}" y1="12" x2="{{ marker.x }}" y2="168"/>
       <text class="equity-day-label" x="{{ marker.x + 5 }}" y="22">{{ marker.label }}</text>
       {% endfor %}
-      {% for anomaly in chart.anomalies %}
-      <circle class="equity-anomaly" cx="{{ anomaly.x }}" cy="{{ anomaly.y }}" r="5"><title>{{ anomaly.label }}</title></circle>
-      {% endfor %}
       <path d="M 12 168 L {{ chart.points }} L 708 168 Z" fill="url(#area)"/>
+      <line class="equity-baseline-line" x1="12" y1="{{ chart.baseline_y }}" x2="708" y2="{{ chart.baseline_y }}"/>
+      <text class="equity-baseline-label" x="704" y="{{ chart.baseline_y - 5 }}" text-anchor="end">$100,000</text>
       <polyline points="{{ chart.points }}" fill="none" stroke="#b8ff60" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
     <div class="chart-axis"><span>{{ chart.start_label }}</span><span>{{ chart.end_label }}</span></div>
-    {% if chart.anomalies %}<p class="equity-anomaly-note">Raw 9:30 broker mark retained in the audit trail and flagged here; excluded from the performance line and display drawdown because adjacent audited marks immediately recovered.</p>{% endif %}
   </article>
   <article class="panel performance-overview" aria-labelledby="performance-title">
     <div class="panel-head">

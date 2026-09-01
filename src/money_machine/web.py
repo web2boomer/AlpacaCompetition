@@ -57,6 +57,7 @@ class EquityChartAnomaly:
 @dataclass(frozen=True, slots=True)
 class EquityChart:
     points: str
+    baseline_y: float
     day_markers: tuple[EquityChartMarker, ...]
     anomalies: tuple[EquityChartAnomaly, ...]
     start_label: str
@@ -409,6 +410,11 @@ def _equity_chart(equities: list[Any], *, now: datetime) -> EquityChart:
     values = [value for _, value in series]
     low, high = min(values), max(values)
     span = high - low
+    baseline_y = (
+        height / 2
+        if span == 0
+        else height - padding - ((float(BASELINE_EQUITY) - low) / span) * (height - 2 * padding)
+    )
     points = []
     duration = max(_trading_elapsed_seconds(chart_end), 1.0)
     for observed_at, value in series:
@@ -466,6 +472,7 @@ def _equity_chart(equities: list[Any], *, now: datetime) -> EquityChart:
         maximum_drawdown = max(maximum_drawdown, peak - value)
     return EquityChart(
         points=" ".join(points),
+        baseline_y=round(baseline_y, 1),
         day_markers=tuple(markers),
         anomalies=tuple(anomalies),
         start_label="Competition start · Aug 31 9:30 ET",

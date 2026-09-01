@@ -60,8 +60,8 @@
 .ops-equity-chart{height:205px;flex:1;min-height:180px}
 .equity-day-line{stroke:rgba(255,255,255,.18);stroke-width:1;stroke-dasharray:3 5}
 .equity-day-label{fill:#88918c;font:8px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.05em;text-transform:uppercase}
-.equity-anomaly{fill:var(--red);stroke:#09100d;stroke-width:2}
-.equity-anomaly-note{margin:7px 0 0;color:#d5b36c;font:8px ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.45}
+.equity-baseline-line{stroke:rgba(242,240,232,.62);stroke-width:1;stroke-dasharray:7 5}
+.equity-baseline-label{fill:#d6d8d2;font:700 8px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em}
 .ops-metrics{margin-top:18px}
 .performance-overview{min-height:390px;padding-bottom:24px}
 .performance-grid{grid-template-columns:repeat(2,minmax(0,1fr));border-bottom:0}
