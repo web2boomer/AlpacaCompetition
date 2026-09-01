@@ -1,8 +1,15 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from money_machine.domain.schemas import OptionQuote
-from money_machine.execution import ManagedStructure, stale_order_action, structure_exit_signal
+from money_machine.execution import (
+    ManagedStructure,
+    daily_hard_exit_deadline,
+    entry_holding_policy,
+    stale_order_action,
+    structure_exit_signal,
+)
 
 
 def test_fresh_order_waits() -> None:
@@ -90,10 +97,65 @@ def test_structure_closes_at_maximum_holding_time_without_waiting_for_price(
     replay_candidate,
 ) -> None:
     opened_at = datetime(2026, 8, 31, 14, tzinfo=UTC)
+    managed = replace(_managed(replay_candidate, opened_at=opened_at), maximum_holding_minutes=60)
     signal = structure_exit_signal(
-        _managed(replay_candidate, opened_at=opened_at),
+        managed,
         quotes={},
-        now=opened_at + timedelta(minutes=360),
+        now=opened_at + timedelta(minutes=60),
     )
     assert signal.should_close
     assert signal.reason == "maximum_holding_time"
+    assert signal.urgency == "soft"
+
+
+def test_daily_hard_boundary_is_urgent_and_prevents_overnight_roll(replay_candidate) -> None:
+    opened_at = datetime(2026, 8, 31, 14, tzinfo=UTC)
+    signal = structure_exit_signal(
+        _managed(replay_candidate, opened_at=opened_at),
+        quotes={},
+        now=datetime(2026, 8, 31, 19, 50, tzinfo=UTC),
+    )
+    assert signal.should_close
+    assert signal.reason == "daily_hard_exit_boundary"
+    assert signal.urgency == "urgent"
+
+
+def test_entry_holding_policy_clamps_and_rejects_too_late() -> None:
+    accepted = entry_holding_policy(datetime(2026, 9, 1, 18, 0, tzinfo=UTC), 360)
+    rejected = entry_holding_policy(datetime(2026, 9, 1, 19, 21, tzinfo=UTC), 60)
+    assert accepted.accepted
+    assert accepted.effective_deadline == datetime(2026, 9, 1, 19, 50, tzinfo=UTC)
+    assert accepted.reason == "daily_boundary"
+    assert not rejected.accepted
+    assert rejected.reason == "insufficient_tradable_session_window"
+
+
+def test_daily_deadline_is_dst_aware_and_thursday_flatten_is_earlier() -> None:
+    assert daily_hard_exit_deadline(datetime(2026, 7, 1, 14, tzinfo=UTC)).hour == 19
+    assert daily_hard_exit_deadline(datetime(2026, 1, 5, 15, tzinfo=UTC)).hour == 20
+    thursday = entry_holding_policy(datetime(2026, 9, 3, 19, 0, tzinfo=UTC), 120)
+    assert thursday.effective_deadline == datetime(2026, 9, 3, 19, 15, tzinfo=UTC)
+    assert not thursday.accepted
+
+
+def test_soft_close_backs_off_without_quote_change_but_urgent_exit_cancels() -> None:
+    submitted = datetime(2026, 9, 1, 14, tzinfo=UTC)
+    soft = stale_order_action(
+        submitted_at=submitted,
+        now=submitted + timedelta(minutes=20),
+        attempt=2,
+        original_limit=Decimal("1.00"),
+        is_credit=True,
+        soft_close=True,
+        quote_materially_changed=False,
+    )
+    urgent = stale_order_action(
+        submitted_at=submitted,
+        now=submitted + timedelta(minutes=20),
+        attempt=2,
+        original_limit=Decimal("1.00"),
+        is_credit=True,
+    )
+    assert soft.action == "wait"
+    assert "materially changed" in soft.reason
+    assert urgent.action == "cancel"

@@ -124,6 +124,7 @@ class Candidate(StrictModel):
     trend_strength: Decimal | None = Field(default=None, ge=0)
     direction_agrees: bool = True
     minimum_confidence: Decimal = Decimal("0")
+    payoff_quality_ratio: Decimal | None = Field(default=None, ge=0)
     gate_evidence: tuple[str, ...]
 
 
@@ -220,6 +221,8 @@ class BrokerOrderRequest(StrictModel):
     environment_role: str
     attempt: int = Field(default=0, ge=0, le=2)
     is_closing: bool = False
+    exit_reason: str | None = None
+    exit_urgency: Literal["soft", "urgent"] | None = None
 
     @model_validator(mode="after")
     def intents_match_authority(self) -> "BrokerOrderRequest":

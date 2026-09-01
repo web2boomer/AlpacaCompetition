@@ -135,6 +135,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
                 "hackathon_ends_at": ENDS_AT.isoformat(),
                 "market_session": market_session_phase(now),
                 "entry_authority": _entry_authority(operational_state),
+                "kill_switch_active": bool(operational_state.get("kill_switch_active", False)),
                 "refreshed_at": now.isoformat(),
             },
         )
@@ -292,6 +293,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
             "execution_state": state.get("execution_state", "observe_only"),
             "kill_switch_active": kill_switch_active,
             "entry_authority": _entry_authority(state, healthy=healthy),
+            "kill_switch_reason": state.get("incident_code"),
             "market_session": market_session_phase(now),
             "timestamp": now.isoformat(),
         }

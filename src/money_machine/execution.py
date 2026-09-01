@@ -1,7 +1,8 @@
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
+from money_machine.domain.clock import FORCED_FLATTEN_STARTS_AT, NEW_YORK
 from money_machine.domain.enums import PositionIntent, Side
 from money_machine.domain.schemas import (
     BrokerOrderRequest,
@@ -11,6 +12,7 @@ from money_machine.domain.schemas import (
 )
 
 STALE_AFTER = timedelta(seconds=90)
+SOFT_STALE_AFTER = timedelta(minutes=15)
 MAX_REPRICE_ATTEMPTS = 2
 REPRICE_INCREMENT = Decimal("0.05")
 MAX_TOTAL_CONCESSION = Decimal("0.10")
@@ -41,6 +43,8 @@ class ManagedOrder:
     submitted_at: datetime
     is_credit: bool
     is_closing: bool
+    exit_reason: str | None
+    exit_urgency: str | None
     legs: tuple[OptionLeg, ...]
 
 
@@ -62,6 +66,43 @@ class StructureExitSignal:
     should_close: bool
     reason: str
     executable_price: Decimal | None
+    urgency: str = "soft"
+
+
+@dataclass(frozen=True, slots=True)
+class EntryHoldingPolicy:
+    accepted: bool
+    effective_holding_minutes: int
+    effective_deadline: datetime
+    reason: str
+
+
+DAILY_HARD_EXIT_TIME = time(15, 50)
+MINIMUM_ENTRY_WINDOW = timedelta(minutes=30)
+
+
+def daily_hard_exit_deadline(at: datetime) -> datetime:
+    local = at.astimezone(NEW_YORK)
+    return datetime.combine(local.date(), DAILY_HARD_EXIT_TIME, tzinfo=NEW_YORK).astimezone(UTC)
+
+
+def entry_holding_policy(at: datetime, model_holding_minutes: int) -> EntryHoldingPolicy:
+    now = at.astimezone(UTC)
+    boundary = min(daily_hard_exit_deadline(now), FORCED_FLATTEN_STARTS_AT)
+    available = max(timedelta(0), boundary - now)
+    effective = min(timedelta(minutes=model_holding_minutes), available)
+    accepted = model_holding_minutes > 0 and available >= MINIMUM_ENTRY_WINDOW
+    reason = (
+        "model_hold" if effective == timedelta(minutes=model_holding_minutes) else "daily_boundary"
+    )
+    if not accepted:
+        reason = "insufficient_tradable_session_window"
+    return EntryHoldingPolicy(
+        accepted=accepted,
+        effective_holding_minutes=max(0, int(effective.total_seconds() // 60)),
+        effective_deadline=now + effective,
+        reason=reason,
+    )
 
 
 def stale_order_action(
@@ -71,10 +112,21 @@ def stale_order_action(
     attempt: int,
     original_limit: Decimal,
     is_credit: bool,
+    soft_close: bool = False,
+    quote_materially_changed: bool = True,
 ) -> OrderLifecycleAction:
-    if now - submitted_at < STALE_AFTER:
+    threshold = SOFT_STALE_AFTER if soft_close else STALE_AFTER
+    if now - submitted_at < threshold:
         return OrderLifecycleAction("wait", None, "order remains inside stale threshold")
+    if soft_close and not quote_materially_changed:
+        return OrderLifecycleAction("wait", None, "soft exit quote has not materially changed")
     if attempt >= MAX_REPRICE_ATTEMPTS:
+        if soft_close:
+            return OrderLifecycleAction(
+                "wait",
+                None,
+                "soft exit retry budget exhausted; hard boundary remains authoritative",
+            )
         return OrderLifecycleAction("cancel", None, "bounded repricing budget exhausted")
     concession = min(REPRICE_INCREMENT * (attempt + 1), MAX_TOTAL_CONCESSION)
     next_limit = original_limit - concession if is_credit else original_limit + concession
@@ -100,7 +152,19 @@ def replacement_request(
         environment_role=environment_role,
         attempt=order.attempt + 1,
         is_closing=order.is_closing,
+        exit_reason=order.exit_reason,
+        exit_urgency=order.exit_urgency,
     )
+
+
+def closing_quote_materially_changed(order: ManagedOrder, quotes: dict[str, OptionQuote]) -> bool:
+    cash = Decimal("0")
+    for leg in order.legs:
+        quote = quotes.get(leg.symbol)
+        if quote is None:
+            return False
+        cash += quote.bid * leg.ratio_qty if leg.side is Side.SELL else -(quote.ask * leg.ratio_qty)
+    return abs(abs(cash) - order.original_limit) >= REPRICE_INCREMENT
 
 
 def structure_exit_signal(
@@ -112,11 +176,13 @@ def structure_exit_signal(
 ) -> StructureExitSignal:
     """Evaluate deterministic profit, loss, holding-time, and portfolio exits."""
     if force_close_reason is not None:
-        return StructureExitSignal(True, force_close_reason, None)
+        return StructureExitSignal(True, force_close_reason, None, "urgent")
+    if now.astimezone(UTC) >= min(daily_hard_exit_deadline(now), FORCED_FLATTEN_STARTS_AT):
+        return StructureExitSignal(True, "daily_hard_exit_boundary", None, "urgent")
     if managed.maximum_holding_minutes > 0 and now >= managed.opened_at + timedelta(
         minutes=managed.maximum_holding_minutes
     ):
-        return StructureExitSignal(True, "maximum_holding_time", None)
+        return StructureExitSignal(True, "maximum_holding_time", None, "soft")
 
     cash_required = _closing_cash_required(managed, quotes)
     if cash_required is None:
@@ -125,16 +191,16 @@ def structure_exit_signal(
     if managed.structure.is_credit:
         close_debit = max(Decimal("0"), cash_required)
         if close_debit <= opening_price * CREDIT_TAKE_PROFIT_FRACTION:
-            return StructureExitSignal(True, "credit_take_profit", close_debit)
+            return StructureExitSignal(True, "credit_take_profit", close_debit, "soft")
         if close_debit >= opening_price * CREDIT_STOP_LOSS_MULTIPLE:
-            return StructureExitSignal(True, "credit_stop_loss", close_debit)
+            return StructureExitSignal(True, "credit_stop_loss", close_debit, "urgent")
         return StructureExitSignal(False, "credit_exit_not_reached", close_debit)
 
     close_credit = max(Decimal("0"), -cash_required)
     if close_credit >= opening_price * DEBIT_TAKE_PROFIT_MULTIPLE:
-        return StructureExitSignal(True, "debit_take_profit", close_credit)
+        return StructureExitSignal(True, "debit_take_profit", close_credit, "soft")
     if close_credit <= opening_price * DEBIT_STOP_VALUE_FRACTION:
-        return StructureExitSignal(True, "debit_stop_loss", close_credit)
+        return StructureExitSignal(True, "debit_stop_loss", close_credit, "urgent")
     return StructureExitSignal(False, "debit_exit_not_reached", close_credit)
 
 
@@ -160,6 +226,8 @@ def close_request(
     client_order_id: str,
     quantity: int,
     environment_role: str,
+    exit_reason: str = "explicit_close",
+    exit_urgency: str = "urgent",
 ) -> BrokerOrderRequest:
     close_legs: list[OptionLeg] = []
     cash_required = _closing_cash_required(managed, quotes)
@@ -198,4 +266,6 @@ def close_request(
         legs=tuple(close_legs),
         environment_role=environment_role,
         is_closing=True,
+        exit_reason=exit_reason,
+        exit_urgency=exit_urgency,
     )

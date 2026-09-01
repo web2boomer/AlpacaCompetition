@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -14,12 +15,12 @@ from money_machine.adapters.replay import ReplayAlpacaAdapter
 from money_machine.business_reporting import BusinessReportBuilder, BusinessReportingOrchestrator
 from money_machine.development_acceptance import run_development_round_trip
 from money_machine.domain.clock import EOD_EQUITY_SNAPSHOT_AT
-from money_machine.domain.enums import RunMode
+from money_machine.domain.enums import AccountRole, AppEnvironment, RunMode, Side
 from money_machine.logging_config import configure_logging
 from money_machine.model_provider import ReplayModelProvider
 from money_machine.persistence.database import Database, normalize_database_url
 from money_machine.persistence.repository import AuditRepository
-from money_machine.safety import configured_account_fingerprint
+from money_machine.safety import configured_account_fingerprint, verify_account_identity
 from money_machine.scheduler import run_scheduler
 from money_machine.service import AgentService
 from money_machine.settings import Settings, load_local_environment
@@ -62,6 +63,7 @@ def main() -> None:
     )
     kill = subparsers.add_parser("kill-switch", help="set the persistent entry kill switch")
     kill.add_argument("state", choices=["on", "off", "status"])
+    kill.add_argument("--confirm-production-clear", action="store_true")
     args = parser.parse_args()
     if args.env_file:
         load_local_environment(args.env_file)
@@ -125,8 +127,12 @@ def main() -> None:
     elif args.command == "kill-switch":
         if args.state == "status":
             _print_json(repository.latest_operational_state())
+        elif args.state == "off":
+            if not args.confirm_production_clear:
+                raise SystemExit("production kill-switch clear requires --confirm-production-clear")
+            _print_json(asyncio.run(_guarded_kill_switch_clear(settings, repository)))
         else:
-            repository.set_kill_switch(active=args.state == "on", now=datetime.now(UTC))
+            repository.set_kill_switch(active=True, now=datetime.now(UTC))
             _print_json({"kill_switch": args.state, "persistent": True})
 
 
@@ -176,6 +182,70 @@ async def _mcp_read_check(settings: Settings) -> dict[str, Any]:
         "open_orders": len(open_orders),
         "open_positions": len(positions),
         "orders_submitted_by_check": 0,
+    }
+
+
+async def _guarded_kill_switch_clear(
+    settings: Settings, repository: AuditRepository
+) -> dict[str, Any]:
+    if (
+        settings.app_env is not AppEnvironment.PRODUCTION
+        or settings.account_role is not AccountRole.COMPETITION
+        or settings.run_mode is not RunMode.LIVE
+    ):
+        raise RuntimeError("guarded clear requires production competition live mode")
+    settings.assert_live_credentials_present()
+    state = repository.latest_operational_state()
+    if not state.get("kill_switch_active"):
+        raise RuntimeError("kill switch is not active")
+    if not state.get("reconciliation_clean") or state.get("incident_code"):
+        raise RuntimeError("latest operational state is not clean and incident-free")
+    latest = repository.latest_passport() or {}
+    if (latest.get("operational_state") or {}).get("incidents"):
+        raise RuntimeError("latest Passport contains an active incident")
+    async with AlpacaMcpV2Adapter(settings) as adapter:
+        account = await adapter.account()
+        identity = verify_account_identity(settings, account)
+        orders, positions = await asyncio.gather(adapter.orders(status="open"), adapter.positions())
+    passport_account = latest.get("account") or {}
+    if passport_account.get("fingerprint") != identity.account_fingerprint:
+        raise RuntimeError("latest Passport account fingerprint does not match broker")
+    if int(passport_account.get("open_position_count", -1)) != len(positions):
+        raise RuntimeError("broker position count does not match latest Passport")
+    if int(passport_account.get("working_order_count", -1)) != len(orders):
+        raise RuntimeError("broker working-order count does not match latest Passport")
+    managed_order_ids = {order.broker_order_id for order in repository.pending_managed_orders()}
+    broker_order_ids = {str(order.get("id") or "") for order in orders}
+    if "" in broker_order_ids or managed_order_ids != broker_order_ids:
+        raise RuntimeError("broker contains an unexplained working order")
+    expected_positions: dict[str, Decimal] = {}
+    for managed in repository.open_managed_structures():
+        for leg in managed.structure.legs:
+            direction = Decimal("1") if leg.side is Side.BUY else Decimal("-1")
+            expected_positions[leg.symbol] = expected_positions.get(leg.symbol, Decimal("0")) + (
+                direction * managed.quantity * leg.ratio_qty
+            )
+    broker_positions = {
+        str(position.get("symbol")): Decimal(str(position.get("qty") or 0))
+        for position in positions
+        if position.get("symbol")
+    }
+    if expected_positions != broker_positions:
+        raise RuntimeError("broker position inventory does not match managed structures")
+    now = datetime.now(UTC)
+    repository.set_kill_switch(
+        active=False,
+        now=now,
+        incident_detail="user_authorized_after_official_account_and_reconciliation_guard",
+    )
+    return {
+        "kill_switch": "off",
+        "guarded": True,
+        "account_fingerprint": identity.account_fingerprint,
+        "reconciliation": "clean",
+        "open_positions": len(positions),
+        "working_orders": len(orders),
+        "observed_at": now.isoformat(),
     }
 
 

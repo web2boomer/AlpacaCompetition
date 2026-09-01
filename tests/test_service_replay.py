@@ -111,10 +111,10 @@ async def test_replay_end_to_end_generates_decision_passport(
     assert outcome.passport["result_label"] == "REPLAY — NOT OFFICIAL P&L"
     assert outcome.passport["risk"]["approved"]
     checks = {item["name"]: item for item in outcome.passport["risk"]["checks"]}
-    assert "applied=true" in checks["high_conviction_index_tier"]["actual"]
-    assert checks["effective_per_structure_percent"]["actual"] == "0.03"
+    assert "applied=false" in checks["high_conviction_index_tier"]["actual"]
+    assert checks["effective_per_structure_percent"]["actual"] == "0.01"
     assert Decimal(checks["effective_per_structure_budget"]["actual"]) == (
-        Decimal(outcome.passport["account"]["equity"]) * Decimal("0.03")
+        Decimal(outcome.passport["account"]["equity"]) * Decimal("0.01")
     )
     assert outcome.passport["execution"]["order_type"] == "limit"
     assert outcome.passport["counterfactuals"]["label"].startswith("HYPOTHETICAL")
@@ -170,6 +170,13 @@ async def test_portfolio_filter_excludes_qqq_but_preserves_full_report_and_selec
     replay_adapter,
     monkeypatch,
 ) -> None:
+    spy = next(item for item in replay_adapter.data["underlyings"] if item["symbol"] == "SPY")
+    spy.update(
+        spot="760.00",
+        previous_close="767.68",
+        realized_move_pct="0.01",
+        trend_return_pct="-0.01",
+    )
     monkeypatch.setattr(
         repository,
         "portfolio_risk_summary",
@@ -210,8 +217,8 @@ async def test_portfolio_filter_excludes_qqq_but_preserves_full_report_and_selec
         for alternative in outcome.passport["counterfactuals"]["alternatives"]
     )
     checks = {item["name"]: item for item in outcome.passport["risk"]["checks"]}
-    assert "applied=true" in checks["legacy_qqq_diversification_exception"]["actual"]
-    assert checks["effective_per_structure_percent"]["actual"] == "0.01"
+    assert "candidate_underlying=SPY" in checks["portfolio_underlying_diversification"]["actual"]
+    assert checks["effective_per_structure_percent"]["actual"] == "0.03"
 
 
 @pytest.mark.asyncio
@@ -221,6 +228,13 @@ async def test_portfolio_filter_records_pending_and_open_reasons_and_abstains_wh
     replay_adapter,
     monkeypatch,
 ) -> None:
+    spy = next(item for item in replay_adapter.data["underlyings"] if item["symbol"] == "SPY")
+    spy.update(
+        spot="760.00",
+        previous_close="767.68",
+        realized_move_pct="0.01",
+        trend_return_pct="-0.01",
+    )
     monkeypatch.setattr(
         repository,
         "portfolio_risk_summary",
@@ -691,6 +705,14 @@ async def test_nonterminal_pending_close_keeps_existing_stale_replacement_path(
     service, _close_request, close_broker_id = await seed_pending_close(
         settings, repository, replay_adapter
     )
+    with repository.database.session() as session:
+        close_order = session.scalar(
+            select(BrokerOrderORM).where(BrokerOrderORM.broker_order_id == close_broker_id)
+        )
+        assert close_order is not None
+        request = dict(close_order.raw_json["request"])
+        request.pop("exit_urgency", None)
+        close_order.raw_json = {**close_order.raw_json, "request": request}
     repository.set_kill_switch(active=True, now=replay_adapter.observed_at)
 
     async def pending_order(_broker_order_id: str):
@@ -949,12 +971,18 @@ async def test_impossible_opening_mark_recovers_without_liquidation(
 async def test_two_credible_breaches_with_fresh_complete_quotes_latch_and_close(
     settings, repository, replay_adapter, monkeypatch
 ) -> None:
+    qqq_short_put = next(
+        quote
+        for quote in replay_adapter.data["chains"]["QQQ"]
+        if quote["symbol"] == "QQQ260904P00700000"
+    )
+    qqq_short_put.update(bid="1.90", ask="2.00")
     await seed_managed_position(settings, repository, replay_adapter)
     cycle_at = replay_adapter.observed_at + timedelta(minutes=5)
     for chain in replay_adapter.data["chains"].values():
         for quote in chain:
             quote["observed_at"] = cycle_at.isoformat()
-    accounts = iter((account_at("96900.00"), account_at("96950.00")))
+    accounts = iter((account_at("97390.00"), account_at("97400.00")))
 
     async def sequenced_account() -> AccountSnapshot:
         return next(accounts)

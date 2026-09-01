@@ -22,8 +22,6 @@ from money_machine.domain.risk import (
     HIGH_CONVICTION_MIN_RICHNESS_RATIO,
     INDEX_CLUSTER_PCT,
     INDEX_PER_STRUCTURE_PCT,
-    LEGACY_QQQ_MAX_STRUCTURES,
-    MAX_OPEN_ALPHA_STRUCTURES,
     TOTAL_DEFINED_LOSS_PCT,
     evaluate_risk,
 )
@@ -177,7 +175,9 @@ def test_daily_loss_provisional_or_latched_state_blocks_entries(replay_candidate
 async def test_high_conviction_index_tier_boundaries(
     replay_candidate, confidence, richness, tier_applied, expected_quantity
 ) -> None:
-    candidate = candidate_with(replay_candidate, richness_ratio=richness)
+    candidate = candidate_with(replay_candidate, richness_ratio=richness).model_copy(
+        update={"payoff_quality_ratio": Decimal("0.25")}
+    )
 
     result = evaluate_risk(decision(candidate, confidence=confidence), candidate, context())
 
@@ -208,7 +208,11 @@ async def test_condor_high_conviction_payoff_boundary(
 ) -> None:
     structure = replay_candidate.structure.model_copy(update={"maximum_profit": maximum_profit})
     candidate = replay_candidate.model_copy(
-        update={"richness_ratio": Decimal("1.50"), "structure": structure}
+        update={
+            "richness_ratio": Decimal("1.50"),
+            "structure": structure,
+            "payoff_quality_ratio": maximum_profit / Decimal("400"),
+        }
     )
 
     result = evaluate_risk(decision(candidate, confidence=0.80), candidate, context())
@@ -235,6 +239,7 @@ async def test_current_102_credit_398_loss_condor_qualifies(replay_candidate) ->
             "expected_credit_or_debit": Decimal("1.02"),
             "richness_ratio": Decimal("1.50"),
             "structure": structure,
+            "payoff_quality_ratio": Decimal("102") / Decimal("398"),
         }
     )
 
@@ -347,8 +352,6 @@ def test_competition_risk_policy_constants_are_fixed() -> None:
     assert Decimal("1") / Decimal("3") == HIGH_CONVICTION_MAX_DEBIT_TO_WIDTH_RATIO
     assert Decimal("0.06") == INDEX_CLUSTER_PCT
     assert Decimal("0.08") == TOTAL_DEFINED_LOSS_PCT
-    assert MAX_OPEN_ALPHA_STRUCTURES == 3
-    assert LEGACY_QQQ_MAX_STRUCTURES == 5
     assert Decimal("0.03") == DAILY_LOSS_PCT
     assert Decimal("0.06") == COMPETITION_DRAWDOWN_PCT
 
@@ -405,7 +408,6 @@ async def test_loss_stops_enforce_exact_authorized_boundaries(
             {"equity": Decimal("93999"), "start_of_day_equity": Decimal("93999")},
             RiskReason.DRAWDOWN,
         ),
-        ({"open_alpha_structures": 3}, RiskReason.OPEN_STRUCTURE_LIMIT),
     ],
 )
 async def test_each_hard_portfolio_gate_rejects(replay_candidate, updates, reason) -> None:
@@ -444,73 +446,31 @@ async def test_existing_managed_structure_is_never_resized_or_added_to(
 
 
 @pytest.mark.asyncio
-async def test_five_open_structures_reject_before_high_conviction_sizing(
+async def test_raw_structure_count_does_not_block_distinct_underlying_with_headroom(
     replay_candidate,
 ) -> None:
+    candidate = candidate_for_underlying(replay_candidate, "SPY")
     result = evaluate_risk(
-        decision(replay_candidate, confidence=0.90),
-        replay_candidate,
-        context(
-            open_alpha_structures=5,
-            open_underlyings=frozenset({replay_candidate.structure.underlying}),
-            index_cluster_defined_loss=Decimal("1979"),
-            total_open_defined_loss=Decimal("1979"),
-        ),
-    )
-
-    assert not result.approved
-    assert result.quantity == 0
-    assert RiskReason.OPEN_STRUCTURE_LIMIT in result.reason_codes
-    assert check(result, "open_structure_count").actual == "5; legacy_qqq_exception=false"
-    assert "normal_open_structures<3" in check(result, "open_structure_count").limit
-    assert "applied=false" in check(result, "high_conviction_index_tier").actual
-    assert RiskReason.EXISTING_STRUCTURE in result.reason_codes
-    assert check(result, "effective_per_structure_percent").actual == "0.01"
-    assert check(result, "cluster_defined_loss_headroom").actual == "4021.00"
-    assert check(result, "total_defined_loss_headroom").actual == "6021.00"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(("open_count", "underlying"), [(4, "SPY"), (5, "IWM")])
-async def test_legacy_qqq_stack_allows_one_distinct_underlying_at_standard_tier_only(
-    replay_candidate,
-    open_count,
-    underlying,
-) -> None:
-    candidate = candidate_for_underlying(
-        replay_candidate,
-        underlying,
-        richness_ratio=Decimal("2.00"),
-    )
-
-    result = evaluate_risk(
-        decision(candidate, confidence=0.99),
+        decision(candidate, confidence=0.79),
         candidate,
         context(
-            open_alpha_structures=open_count,
-            open_underlyings=frozenset({"QQQ"}),
-            index_cluster_defined_loss=Decimal("1979"),
-            total_open_defined_loss=Decimal("1979"),
+            open_alpha_structures=3,
+            open_underlyings=frozenset({"QQQ", "IWM"}),
+            index_cluster_defined_loss=Decimal("1357"),
+            total_open_defined_loss=Decimal("1357"),
         ),
     )
 
     assert result.approved
     assert result.quantity == 2
-    assert result.awarded_risk == Decimal("800")
-    exception = check(result, "legacy_qqq_diversification_exception")
-    assert "applied=true" in exception.actual
-    assert f"candidate_underlying={underlying}" in exception.actual
-    assert "effective_tier=standard_index_only" in exception.actual
-    assert "legacy_qqq_exception=true" in check(result, "open_structure_count").actual
-    tier = check(result, "high_conviction_index_tier")
-    assert "applied=false" in tier.actual
-    assert "legacy_qqq_exception_standard_only" in tier.actual
-    assert check(result, "effective_per_structure_percent").actual == "0.01"
-    assert check(result, "effective_per_structure_budget").actual == "1000.00"
+    assert result.awarded_risk == Decimal("796")
+    diversification = check(result, "portfolio_underlying_diversification")
+    assert "open_underlyings=IWM,QQQ" in diversification.actual
+    assert "candidate_underlying=SPY" in diversification.actual
 
 
 @pytest.mark.asyncio
-async def test_live_style_spy_debit_spread_sizes_to_eight_under_legacy_exception(
+async def test_live_style_spy_debit_spread_sizes_to_eight_with_distinct_underlying(
     replay_candidate,
 ) -> None:
     candidate = candidate_for_underlying(
@@ -539,73 +499,7 @@ async def test_live_style_spy_debit_spread_sizes_to_eight_under_legacy_exception
     assert result.awarded_risk == Decimal("960.00")
     assert check(result, "effective_per_structure_percent").actual == "0.01"
     assert check(result, "effective_per_structure_budget").actual == "1000.00"
-    assert "applied=true" in check(result, "legacy_qqq_diversification_exception").actual
     assert "applied=false" in check(result, "high_conviction_index_tier").actual
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("open_count", "open_underlyings", "pending_underlyings", "underlying", "action"),
-    [
-        (5, frozenset({"QQQ"}), frozenset(), "QQQ", Action.INDEX_CONDOR),
-        (5, frozenset({"QQQ", "SPY"}), frozenset(), "IWM", Action.INDEX_CONDOR),
-        (5, frozenset({"QQQ"}), frozenset({"SPY"}), "IWM", Action.INDEX_CONDOR),
-        (6, frozenset({"QQQ"}), frozenset(), "SPY", Action.INDEX_CONDOR),
-        (3, frozenset({"QQQ"}), frozenset(), "SPY", Action.INDEX_CONDOR),
-        (5, frozenset({"QQQ"}), frozenset(), "SPY", Action.EARNINGS_CONDOR),
-    ],
-)
-async def test_legacy_qqq_exception_fails_closed_outside_exact_scope(
-    replay_candidate,
-    open_count,
-    open_underlyings,
-    pending_underlyings,
-    underlying,
-    action,
-) -> None:
-    candidate = candidate_for_underlying(replay_candidate, underlying)
-    if action is not candidate.action:
-        candidate = candidate_with(candidate, action=action)
-
-    result = evaluate_risk(
-        decision(candidate, confidence=0.99),
-        candidate,
-        context(
-            open_alpha_structures=open_count,
-            open_underlyings=open_underlyings,
-            pending_underlyings=pending_underlyings,
-            index_cluster_defined_loss=Decimal("1979"),
-            total_open_defined_loss=Decimal("1979"),
-        ),
-    )
-
-    assert not result.approved
-    assert result.quantity == 0
-    assert RiskReason.OPEN_STRUCTURE_LIMIT in result.reason_codes
-    assert "applied=false" in check(result, "legacy_qqq_diversification_exception").actual
-
-
-@pytest.mark.asyncio
-async def test_legacy_qqq_exception_cannot_bypass_cluster_or_total_headroom(
-    replay_candidate,
-) -> None:
-    candidate = candidate_for_underlying(replay_candidate, "SPY")
-
-    result = evaluate_risk(
-        decision(candidate),
-        candidate,
-        context(
-            open_alpha_structures=5,
-            open_underlyings=frozenset({"QQQ"}),
-            index_cluster_defined_loss=Decimal("5990"),
-            total_open_defined_loss=Decimal("7990"),
-        ),
-    )
-
-    assert not result.approved
-    assert result.quantity == 0
-    assert RiskReason.ZERO_QUANTITY in result.reason_codes
-    assert "applied=true" in check(result, "legacy_qqq_diversification_exception").actual
 
 
 @pytest.mark.asyncio
@@ -645,7 +539,7 @@ async def test_quantity_floors_to_smallest_remaining_budget(replay_candidate) ->
 
     assert result.approved
     assert result.quantity == 1
-    assert result.awarded_risk == Decimal("400")
+    assert result.awarded_risk == Decimal("398")
     assert result.awarded_risk <= Decimal("3000")
     assert result.awarded_risk <= Decimal("750")
     assert result.awarded_risk <= Decimal("800")

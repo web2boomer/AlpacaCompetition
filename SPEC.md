@@ -268,8 +268,13 @@ Intent: harvest the index/ETF variance risk premium when implied movement is ric
 Required gates:
 
 - Sufficient option-chain depth and freshness.
-- Short legs satisfy minimum volume and open interest.
+- Every leg has a fresh bid/ask, available quote depth when supplied, and trustworthy daily
+  volume. Open interest is used when the source supplies it but is not fabricated or required
+  from Alpaca's option snapshot schema.
 - Net structure spread is below the configured fraction of expected credit.
+- Executable adverse-side credit implies reward/risk of at least 0.20 before the candidate can
+  enter the auction. Rejected structures remain in the full CandidateBuildReport and
+  counterfactual evidence.
 - Implied move is inside a sane range.
 - Richness ratio exceeds the minimum threshold.
 - No disallowed macro event within the intended holding period.
@@ -340,14 +345,9 @@ Competition limits:
   credible liquidation signal. A validated breach latches the entry halt through the UTC
   session; reconciliation and other structural safety incidents retain immediate close authority.
 - Competition peak-to-trough drawdown stop: 6.00%.
-- Maximum three open alpha structures.
-- Temporary legacy-stack accommodation: while reconciliation identifies four or five open
-  alpha structures all on QQQ, with no pending entry, one SPY or IWM index structure may
-  pass the count gate at the ordinary 1.00% tier only. The accommodation never permits a
-  new QQQ structure, high-conviction sizing, pyramiding, or a second distinct-underlying
-  entry. It disables itself as soon as a distinct-underlying order is pending or established,
-  and the normal maximum-three rule applies automatically once the legacy QQQ count is
-  three or fewer.
+- Maximum one managed or pending alpha structure per underlying. Raw parent-order count is not
+  an independent veto; authoritative 6.00% correlated-cluster and 8.00% total defined-loss caps
+  remain final portfolio limits.
 - Maximum one pending entry per underlying.
 - No pyramiding, adding to, or resizing an existing managed structure.
 - No naked legs.
@@ -388,9 +388,17 @@ FILLED -> OPEN -> CLOSING -> CLOSED
 
 Stale orders are canceled and may be repriced only within a small deterministic concession budget.
 Opening orders are canceled immediately at the entry cutoff. Closing orders reprice only their
-remaining quantity. Ordinary close-repricing exhaustion cancels that order but does not strand the
-structure: authoritative remaining exposure becomes eligible for a new idempotent emergency-close
-series with a unique deterministic client ID and increasingly marketable multi-leg limits.
+remaining quantity. Soft exits such as maximum-hold and profit-target closes use quote-aware
+backoff, a longer stale window, and bounded concessions; an unchanged market does not trigger a
+five-minute cancel/replace loop. Urgent stop, daily-loss, hard-deadline, and reconciliation exits
+retain the existing aggressive bounded path. Ordinary close-repricing exhaustion cancels that
+order but does not strand the structure: authoritative remaining exposure becomes eligible for a
+new idempotent emergency-close series with a unique deterministic client ID and increasingly
+marketable multi-leg limits.
+
+Every approved entry records an effective holding deadline equal to the earliest of the model's
+requested hold, the 3:50 PM ET daily hard exit, and Thursday's forced-flatten boundary. At least
+30 minutes must remain before that deadline or the entry fails closed.
 
 ### 11.3 Reconciliation
 

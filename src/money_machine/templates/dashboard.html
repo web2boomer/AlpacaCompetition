@@ -73,7 +73,7 @@
   <article class="panel performance-overview" aria-labelledby="performance-title">
     <div class="panel-head">
       <h2 id="performance-title">Performance</h2>
-      <span class="mode-badge">{{ performance.get('scoring_window_state', 'pre_scoring')|replace('_', ' ') }}</span>
+      <span class="mode-badge {{ 'danger' if kill_switch_active else '' }}" id="entry-authority-badge">{{ 'ENTRY DISABLED · KILL SWITCH' if kill_switch_active else performance.get('scoring_window_state', 'pre_scoring')|replace('_', ' ') }}</span>
     </div>
     {% if performance.get('available') %}
     <div class="metric-grid ops-metrics performance-grid" aria-label="Verified account metrics">
@@ -459,6 +459,12 @@
           activityResponse.json(), healthResponse.json()
         ]);
         renderMarketSession(health.market_session);
+        const entryDisabled = health.kill_switch_active === true;
+        const entryBadge = document.getElementById("entry-authority-badge");
+        if (entryBadge) {
+          entryBadge.textContent = entryDisabled ? "ENTRY DISABLED · KILL SWITCH" : "SCORING";
+          entryBadge.classList.toggle("danger", entryDisabled);
+        }
         renderTradingAvailability(health);
         let accountFresh = false;
         try {
@@ -482,7 +488,7 @@
         }
         renderActivity(payload.entries);
         if (!accountFresh) setUpdated(payload.generated_at);
-        connection.textContent = health.status === "healthy" ? "Live" : "Degraded";
+        connection.textContent = entryDisabled ? "Entry disabled" : health.status === "healthy" ? "Live" : "Degraded";
         const healthy = health.status === "healthy";
         architectureStatus.textContent = healthy ? "System responding" : "Attention required";
         architectureLive.classList.toggle("degraded", !healthy);

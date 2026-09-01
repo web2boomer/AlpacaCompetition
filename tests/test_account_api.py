@@ -1,6 +1,9 @@
+from datetime import UTC, datetime
+
 import pytest
 from fastapi.testclient import TestClient
 
+from money_machine.persistence.repository import AuditRepository
 from money_machine.web import create_app
 
 
@@ -63,3 +66,17 @@ def test_account_api_degrades_without_affecting_health(
     assert account.json()["equity"] is None
     assert health.status_code == 200
     assert health.json()["status"] == "healthy"
+
+
+def test_health_degrades_and_disables_entries_while_kill_switch_is_active(
+    settings, database
+) -> None:
+    repository = AuditRepository(database)
+    repository.set_kill_switch(active=True, now=datetime.now(UTC))
+    with TestClient(create_app(settings, database)) as client:
+        health = client.get("/api/health")
+        dashboard = client.get("/")
+    assert health.status_code == 503
+    assert health.json()["kill_switch_active"] is True
+    assert health.json()["entry_authority"] == "entry_disabled"
+    assert "ENTRY DISABLED · KILL SWITCH" in dashboard.text

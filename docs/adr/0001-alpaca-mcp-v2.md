@@ -10,7 +10,12 @@ The order adapter follows V2's current `place_option_order` contract: `order_cla
 
 ## Data caveat
 
-The V2 option-chain snapshot can omit daily contract volume or open interest depending on the underlying Alpaca response/feed. Missing fields are assigned zero so the liquidity compiler rejects the structure. It does not infer liquidity from trade size or relax policy to force a candidate. A production calibration may enrich shortlisted contracts through additional V2 contract/bar tools, but it may not bypass this fail-closed behavior.
+The V2 option snapshot carries daily volume at `dailyBar.v` and does not expose open interest in
+its current schema. The adapter normalizes that field plus already-normalized aliases and leaves
+unavailable values explicit instead of presenting them as observed zeroes. Liquidity therefore
+uses fresh bid/ask, available quote sizes, daily volume, and structure-spread quality; open
+interest is enforced only when a trustworthy source actually supplies it. Missing or stale quote
+evidence still fails closed.
 
 ## Direct API fallback
 

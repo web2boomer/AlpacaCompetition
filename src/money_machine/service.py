@@ -33,6 +33,9 @@ from money_machine.domain.schemas import (
 )
 from money_machine.execution import (
     close_request,
+    closing_quote_materially_changed,
+    daily_hard_exit_deadline,
+    entry_holding_policy,
     replacement_request,
     stale_order_action,
     structure_exit_signal,
@@ -394,6 +397,17 @@ class AgentService:
                 daily_loss_entry_halt_active=daily_control.status in {"provisional", "latched"},
             )
             risk = evaluate_risk(envelope.decision, selected, context)
+            holding_policy = entry_holding_policy(now, envelope.decision.maximum_holding_minutes)
+            if risk.approved:
+                envelope = envelope.model_copy(
+                    update={
+                        "decision": envelope.decision.model_copy(
+                            update={
+                                "maximum_holding_minutes": holding_policy.effective_holding_minutes
+                            }
+                        )
+                    }
+                )
             auction = AuctionResult(
                 ranked_candidate_ids=tuple(c.candidate_id for c in auction_candidates),
                 selected_candidate_id=envelope.decision.candidate_id,
@@ -534,6 +548,7 @@ class AgentService:
         events: list[dict[str, Any]] = []
         incidents: list[str] = []
         active_closing_candidates: set[str] = set()
+        quote_map = {quote.symbol: quote for chain in chains.values() for quote in chain}
         for candidate_id in self.repository.reconcile_filled_closing_parents(now=now):
             events.append(
                 {
@@ -565,6 +580,14 @@ class AgentService:
                     )
                     continue
             cutoff_cancel = not order.is_closing and not allow_new_entries
+            urgent_close = bool(
+                order.is_closing
+                and (
+                    order.exit_urgency != "soft"
+                    or force_close_reason is not None
+                    or now >= min(daily_hard_exit_deadline(now), FORCED_FLATTEN_STARTS_AT)
+                )
+            )
             action = (
                 None
                 if cutoff_cancel
@@ -574,6 +597,12 @@ class AgentService:
                     attempt=order.attempt,
                     original_limit=order.original_limit,
                     is_credit=order.is_credit,
+                    soft_close=order.is_closing and not urgent_close,
+                    quote_materially_changed=(
+                        closing_quote_materially_changed(order, quote_map)
+                        if order.is_closing
+                        else True
+                    ),
                 )
             )
             closing_candidate = order.candidate_id.removesuffix(":close")
@@ -601,6 +630,9 @@ class AgentService:
                     "broker_order_id": order.broker_order_id,
                     "status": canceled_status,
                     "remaining_quantity": order.remaining_quantity,
+                    "exit_reason": order.exit_reason,
+                    "exit_urgency": "urgent" if urgent_close else order.exit_urgency,
+                    "lifecycle_reason": action.reason if action is not None else "entry_cutoff",
                 }
             )
             may_replace = market_open and (order.is_closing or allow_new_entries)
@@ -638,10 +670,11 @@ class AgentService:
                     "broker_order_id": result.broker_order_id,
                     "status": result.status,
                     "quantity": request.quantity,
+                    "exit_reason": request.exit_reason,
+                    "exit_urgency": request.exit_urgency,
                 }
             )
 
-        quote_map = {quote.symbol: quote for chain in chains.values() for quote in chain}
         position_quantities = {
             str(position.get("symbol")): abs(Decimal(str(position.get("qty") or 0)))
             for position in positions
@@ -704,6 +737,8 @@ class AgentService:
                     client_order_id=client_order_id,
                     quantity=quantity,
                     environment_role=self.settings.account_role.value,
+                    exit_reason=signal.reason,
+                    exit_urgency=signal.urgency,
                 )
             except ValueError:
                 incidents.append("rejected_close_incomplete_quotes")
@@ -719,6 +754,7 @@ class AgentService:
                     "broker_order_id": result.broker_order_id,
                     "status": result.status,
                     "quantity": request.quantity,
+                    "exit_urgency": signal.urgency,
                 }
             )
         return tuple(events), tuple(dict.fromkeys(incidents))
@@ -860,6 +896,16 @@ def _passport(
                 }
                 for candidate in report.candidates
                 if candidate.candidate_id != auction.selected_candidate_id
+            ]
+            + [
+                {
+                    "candidate_id": candidate.candidate_id,
+                    "maximum_profit": str(candidate.structure.maximum_profit),
+                    "maximum_loss": str(candidate.structure.maximum_loss),
+                    "excluded_before_auction": True,
+                    "reason": reason,
+                }
+                for candidate, reason in report.rejected_candidates
             ],
         },
         "audit_hash": hashlib.sha256(

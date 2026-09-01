@@ -364,6 +364,8 @@ class AuditRepository:
                         "request": {
                             "is_credit": request.is_credit,
                             "is_closing": request.is_closing,
+                            "exit_reason": request.exit_reason,
+                            "exit_urgency": request.exit_urgency,
                             "legs": [leg.model_dump(mode="json") for leg in request.legs],
                         },
                     },
@@ -474,6 +476,12 @@ class AuditRepository:
                         submitted_at=_safe_datetime(row.submitted_at),
                         is_credit=bool(request.get("is_credit", False)),
                         is_closing=bool(request.get("is_closing", False)),
+                        exit_reason=(
+                            str(request["exit_reason"]) if request.get("exit_reason") else None
+                        ),
+                        exit_urgency=(
+                            str(request["exit_urgency"]) if request.get("exit_urgency") else None
+                        ),
                         legs=tuple(OptionLeg.model_validate(leg) for leg in raw_legs),
                     )
                 )
@@ -1082,7 +1090,9 @@ class AuditRepository:
                 )
             )
 
-    def set_kill_switch(self, *, active: bool, now: datetime) -> None:
+    def set_kill_switch(
+        self, *, active: bool, now: datetime, incident_detail: str | None = None
+    ) -> None:
         latest = self.latest_operational_state()
         state_value = latest.get("execution_state", ExecutionState.HALTED.value)
         self.append_system_state(
@@ -1093,7 +1103,10 @@ class AuditRepository:
             reconciliation_clean=bool(latest.get("reconciliation_clean", True)),
             success=True,
             scheduler_event=False,
-            incident_code="manual_kill_switch" if active else "kill_switch_cleared",
+            incident_code=(
+                "manual_kill_switch" if active else "authorized_guarded_kill_switch_clear"
+            ),
+            incident_detail=incident_detail,
         )
 
     def complete_run(

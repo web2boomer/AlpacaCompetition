@@ -49,15 +49,18 @@ require at least 0.50% deterministic trend strength, at least 2.00 reward/risk, 
 no greater than one-third of spread width so expensive premium alone cannot trigger the
 larger tier. Earnings stays
 at 0.35%. The shared SPY/QQQ/IWM cap is 6.00%, total concurrent defined loss is capped at
-8.00%, daily loss at 3.00%, and peak drawdown at 6.00%. At most three
-alpha structures may normally be open, with no pending duplicate or addition to an existing
-managed underlying. A narrow legacy-stack accommodation permits one ordinary-tier SPY or
-IWM index structure only while four or five reconciled open structures are all QQQ and no
-entry is pending. It cannot add QQQ exposure, cannot use the high-conviction tier, and
-disables itself after the first distinct-underlying order or when the QQQ legacy count is
-three or fewer. Quantity is always floored from the smallest remaining applicable budget,
-and the effective tier, legacy-exception evidence, and budget are recorded in the Decision
-Passport.
+8.00%, daily loss at 3.00%, and peak drawdown at 6.00%. A candidate is excluded when its
+underlying already has a managed structure or pending entry; raw parent count is not a second
+portfolio veto. Quantity is always floored from the smallest remaining applicable budget, and
+the effective tier, per-underlying evidence, correlated headroom, and total headroom are recorded
+in the Decision Passport.
+
+Index condors must clear 0.20 reward/risk using adverse executable bid/ask economics before the
+model auction; the 0.25 high-conviction threshold remains stricter and unchanged. Rejected
+structures remain in the complete CandidateBuildReport for audit and counterfactual analysis.
+Entries also require at least 30 minutes before the earliest of the model hold, the 3:50 PM ET
+daily hard exit, and Thursday forced flatten. Soft maximum-hold/profit exits use quote-aware
+backoff, while urgent safety exits retain aggressive bounded concessions.
 
 The daily-loss control is persistent and session-scoped. A raw 3.00% breach immediately
 freezes entries, but a clean defined-risk book is force-closed only after a second account

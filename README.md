@@ -97,6 +97,8 @@ Commands report credentials only as present or missing. They never print account
 # Persistent entry kill switch; cancel/close authority is unaffected
 .venv/bin/money-machine kill-switch on
 .venv/bin/money-machine kill-switch status
+# Production clear is guarded by account identity, reconciliation, Passport, and broker counts
+.venv/bin/money-machine --env-file .env.competition.local kill-switch off --confirm-production-clear
 
 # Single guarded scheduler cycle, useful for operations checks
 .venv/bin/money-machine --env-file .env.competition.local scheduler --once
@@ -160,7 +162,7 @@ services and a Basic database, so review Render pricing before applying it.
 - Structures use one underlying, one expiry, equal leg ratios, and bounded long wings.
 - Multi-leg entries are day limit orders with deterministic client IDs.
 - Stale entries are canceled and can be replaced only twice within a fixed concession budget.
-- Open positions use executable-quote profit targets, stop losses, the model's maximum holding time, and portfolio loss/drawdown exits. New entries and all working opening orders stop at Thursday's 2:30 PM ET cutoff. Forced liquidation of every managed credit and debit structure starts by 3:15 PM, the internal flat target is 3:45 PM, and Alpaca's 4:00 PM EOD equity is the authoritative measurement. Close-only recovery persists until broker positions and relevant working orders confirm flat.
+- Open positions use executable-quote profit targets, stop losses, the model's maximum holding time, and portfolio loss/drawdown exits. Every entry needs at least 30 minutes before the earliest effective deadline; the normal daily hard exit is 3:50 PM ET and Thursday forced liquidation starts by 3:15 PM. Soft exits use quote-aware bounded backoff while urgent safety exits retain aggressive bounded concessions. New entries and all working opening orders stop at Thursday's 2:30 PM ET cutoff, the internal flat target is 3:45 PM, and Alpaca's 4:00 PM EOD equity is the authoritative measurement. Close-only recovery persists until broker positions and relevant working orders confirm flat.
 - The dashboard's primary countdown targets Thursday's authoritative 4:00 PM ET equity lock. Friday's 9:30 AM ET hackathon deadline is shown only as submission-window context, not additional trading time.
 - Counterfactual and replay data are visually and structurally separate from official P&L.
 

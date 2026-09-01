@@ -22,6 +22,7 @@ MIN_IMPLIED_MOVE_PCT = Decimal("0.003")
 MAX_IMPLIED_MOVE_PCT = Decimal("0.08")
 MAX_STRUCTURE_SPREAD_TO_EDGE = Decimal("0.45")
 MIN_CREDIT = Decimal("0.20")
+MIN_CONDOR_REWARD_RISK = Decimal("0.20")
 DIRECTIONAL_TREND_THRESHOLD = Decimal("0.004")
 DIRECTIONAL_MIN_CONFIDENCE = Decimal("0.72")
 DIRECTIONAL_SPREAD_WIDTH = Decimal("5")
@@ -33,6 +34,7 @@ CENT = Decimal("0.01")
 class CandidateBuildReport:
     candidates: tuple[Candidate, ...]
     rejections: dict[str, tuple[str, ...]]
+    rejected_candidates: tuple[tuple[Candidate, str], ...] = ()
 
 
 def build_candidates(
@@ -41,6 +43,7 @@ def build_candidates(
     now: datetime,
 ) -> CandidateBuildReport:
     candidates: list[Candidate] = []
+    rejected_candidates: list[tuple[Candidate, str]] = []
     rejections: dict[str, tuple[str, ...]] = {}
     for snapshot in snapshots:
         snapshot = snapshot.model_copy(
@@ -51,18 +54,30 @@ def build_candidates(
         chain = chains.get(snapshot.symbol, [])
         condor = _build_condor(snapshot, chain, now, reasons)
         if condor:
-            symbol_candidates.append(condor)
+            reward_risk = condor.payoff_quality_ratio or (
+                condor.structure.maximum_profit / condor.structure.maximum_loss
+            )
+            if reward_risk < MIN_CONDOR_REWARD_RISK:
+                reason = f"condor reward/risk {reward_risk:.3f} below {MIN_CONDOR_REWARD_RISK:.3f}"
+                reasons.append(reason)
+                rejected_candidates.append((condor, reason))
+            else:
+                symbol_candidates.append(condor)
         if snapshot.symbol in DIRECTIONAL_UNDERLYINGS:
             directional = _build_directional(snapshot, chain, now, reasons)
             if directional:
                 symbol_candidates.append(directional)
-        if not symbol_candidates:
+        if reasons:
             rejections[snapshot.symbol] = tuple(dict.fromkeys(reasons)) or (
                 "no eligible defined-risk structure",
             )
         candidates.extend(symbol_candidates)
     candidates.sort(key=lambda candidate: (-candidate.score, candidate.candidate_id))
-    return CandidateBuildReport(candidates=tuple(candidates), rejections=rejections)
+    return CandidateBuildReport(
+        candidates=tuple(candidates),
+        rejections=rejections,
+        rejected_candidates=tuple(rejected_candidates),
+    )
 
 
 def _build_condor(
@@ -127,6 +142,12 @@ def _build_condor(
         return None
     maximum_loss = calculate_maximum_loss(Action.INDEX_CONDOR, legs, midpoint_credit)
     maximum_profit = (midpoint_credit * MULTIPLIER).quantize(CENT)
+    executable_maximum_loss = calculate_maximum_loss(Action.INDEX_CONDOR, legs, executable_credit)
+    executable_reward_risk = (
+        executable_credit * MULTIPLIER / executable_maximum_loss
+        if executable_credit > 0
+        else Decimal("0")
+    )
     structure = OptionStructure(
         strategy=Action.INDEX_CONDOR,
         underlying=snapshot.symbol,
@@ -151,11 +172,13 @@ def _build_condor(
         data_age_seconds=age,
         event_risk=False,
         liquidity_passed=True,
+        payoff_quality_ratio=executable_reward_risk,
         gate_evidence=(
             f"implied/realized move ratio {richness:.2f}",
             f"four-leg midpoint credit ${midpoint_credit:.2f}",
             f"defined maximum loss ${maximum_loss:.2f} per contract",
             f"structure spread ${structure_spread:.2f}",
+            f"executable reward/risk {executable_reward_risk:.3f}",
         ),
     )
 

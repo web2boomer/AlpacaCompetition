@@ -4,7 +4,11 @@ from decimal import Decimal
 import pytest
 
 from money_machine.adapters.replay import infer_atm_implied_move
-from money_machine.domain.candidates import DIRECTIONAL_SPREAD_WIDTH, build_candidates
+from money_machine.domain.candidates import (
+    DIRECTIONAL_SPREAD_WIDTH,
+    MIN_CONDOR_REWARD_RISK,
+    build_candidates,
+)
 from money_machine.domain.enums import Action, ExecutionState, OptionRight, Regime, Side
 from money_machine.domain.events import scheduled_macro_event_risk
 from money_machine.domain.options import calculate_maximum_loss, validate_defined_risk
@@ -112,6 +116,35 @@ async def test_condor_maximum_loss_geometry(replay_candidate) -> None:
     calculated = calculate_maximum_loss(structure.strategy, structure.legs, structure.net_price)
     assert calculated == structure.maximum_loss
     assert calculated <= Decimal("500")
+
+
+@pytest.mark.parametrize(("reward_risk", "accepted"), [("0.199", False), ("0.200", True)])
+@pytest.mark.asyncio
+async def test_condor_standard_reward_risk_boundary(
+    replay_adapter, replay_candidate, monkeypatch, reward_risk, accepted
+) -> None:
+    ratio = Decimal(reward_risk)
+    structure = replay_candidate.structure.model_copy(
+        update={"maximum_loss": Decimal("500"), "maximum_profit": Decimal("500") * ratio}
+    )
+    condor = replay_candidate.model_copy(
+        update={"structure": structure, "payoff_quality_ratio": ratio}
+    )
+    monkeypatch.setattr("money_machine.domain.candidates._build_condor", lambda *_args: condor)
+    monkeypatch.setattr("money_machine.domain.candidates._build_directional", lambda *_args: None)
+    snapshot = (await replay_adapter.underlying_snapshot("QQQ")).model_copy(
+        update={"trend_return_pct": Decimal("0")}
+    )
+
+    report = build_candidates([snapshot], {"QQQ": []}, replay_adapter.observed_at)
+
+    assert Decimal("0.20") == MIN_CONDOR_REWARD_RISK
+    assert bool(report.candidates) is accepted
+    if accepted:
+        assert report.rejected_candidates == ()
+    else:
+        assert report.rejected_candidates[0][0].candidate_id == condor.candidate_id
+        assert "condor reward/risk 0.199 below 0.200" in report.rejections["QQQ"]
 
 
 @pytest.mark.asyncio
@@ -232,7 +265,7 @@ async def test_iwm_directional_candidate_sizes_with_existing_index_caps(replay_a
 
 
 @pytest.mark.asyncio
-async def test_iwm_directional_legacy_exception_forces_standard_tier(replay_adapter) -> None:
+async def test_iwm_directional_distinct_underlying_remains_eligible(replay_adapter) -> None:
     snapshot, chain = await iwm_directional_inputs(replay_adapter, bullish=False)
     chain = [
         quote.model_copy(update={"bid": Decimal("2.15"), "ask": Decimal("2.25")})
@@ -260,8 +293,10 @@ async def test_iwm_directional_legacy_exception_forces_standard_tier(replay_adap
     assert result.approved
     assert candidate.structure.maximum_loss == Decimal("120.00")
     assert candidate.structure.maximum_profit == Decimal("380.00")
-    assert result.quantity == 8
-    assert result.awarded_risk == Decimal("960.00")
-    assert risk_check(result, "effective_per_structure_percent").actual == "0.01"
-    assert "applied=true" in risk_check(result, "legacy_qqq_diversification_exception").actual
-    assert "applied=false" in risk_check(result, "high_conviction_index_tier").actual
+    assert result.quantity == 25
+    assert result.awarded_risk == Decimal("3000.00")
+    assert risk_check(result, "effective_per_structure_percent").actual == "0.03"
+    assert (
+        "candidate_underlying=IWM"
+        in risk_check(result, "portfolio_underlying_diversification").actual
+    )
