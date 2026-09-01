@@ -196,6 +196,19 @@ Boundary tests are required for one second before, exactly at, and one second af
 The regular market-hours loop runs every five minutes and increases to approximately once per minute
 from forced-liquidation start until Alpaca positions and relevant working orders confirm flat.
 
+For the September 2–3 recovery window, new production entries are considered only from 09:45 ET
+inclusive to 14:30 ET exclusive. New-entry auction input is limited to SPY/QQQ/IWM call and put
+debit spreads. Index condors continue to be compiled and persisted for Decision Passport and
+counterfactual evidence, but carry the explicit `competition_directional_only_policy` exclusion and
+cannot reach the model auction. This temporary policy does not alter lifecycle authority for an
+already-managed structure.
+
+A directional candidate must retain the same sign and at least 0.40% absolute return from previous
+close across the current and immediately preceding completed five-minute observation. The cycle
+buckets must be 5–10 minutes apart. Missing, weak, reversed, malformed, or stale prior evidence
+fails closed, and both observation timestamps and trend values are sealed in the Passport. The
+existing high-conviction requirements and 1%/3% sizing tiers remain unchanged.
+
 Each loop:
 
 1. Verifies account identity and competition state.

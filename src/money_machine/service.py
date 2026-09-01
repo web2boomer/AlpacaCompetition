@@ -1,7 +1,7 @@
 import asyncio
 import hashlib
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -12,11 +12,13 @@ from money_machine.domain.clock import (
     FORCED_FLATTEN_STARTS_AT,
     CompetitionClockSnapshot,
     competition_clock,
+    competition_entry_window_open,
     is_official_performance_observation,
 )
 from money_machine.domain.daily_loss import loss_is_plausible, validate_managed_book_marks
 from money_machine.domain.enums import (
     AccountRole,
+    Action,
     AppEnvironment,
     ExecutionState,
     RiskReason,
@@ -44,12 +46,18 @@ from money_machine.execution import (
     urgent_close_debit_cap,
 )
 from money_machine.model_provider import safe_model_decision
-from money_machine.persistence.repository import AuditRepository, deterministic_client_order_id
+from money_machine.persistence.repository import (
+    AuditRepository,
+    PriorMarketObservation,
+    deterministic_client_order_id,
+)
 from money_machine.ports import AlpacaPort, ModelProvider
 from money_machine.safety import verify_account_identity, verify_competition_baseline
 from money_machine.settings import Settings
 
 UNIVERSE = ("SPY", "QQQ", "IWM")
+DIRECTION_CONFIRMATION_MIN_GAP = timedelta(minutes=5)
+DIRECTION_CONFIRMATION_MAX_GAP = timedelta(minutes=10)
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,7 +162,9 @@ class AgentService:
                 execution_state = (
                     ExecutionState.FULL_EXECUTION if market_open else ExecutionState.OBSERVE_ONLY
                 )
-            elif execution_state is ExecutionState.FULL_EXECUTION and not market_open:
+            elif execution_state is ExecutionState.FULL_EXECUTION and (
+                not market_open or (production_account and not competition_entry_window_open(now))
+            ):
                 execution_state = ExecutionState.OBSERVE_ONLY
 
             snapshots_raw, chains_raw = await asyncio.gather(
@@ -337,6 +347,22 @@ class AgentService:
                 pending_underlyings=risk_summary["pending_underlyings"],
                 open_underlyings=risk_summary["open_underlyings"],
             )
+            directional_exclusions, directional_confirmation = (
+                _directional_policy_exclusions(
+                    report.candidates,
+                    snapshots=snapshots,
+                    repository=self.repository,
+                    run_id=run_id,
+                    mode=mode,
+                    now=now,
+                )
+                if production_account
+                else ({}, {})
+            )
+            for candidate_id, reasons in directional_exclusions.items():
+                portfolio_candidate_exclusions[candidate_id] = tuple(
+                    dict.fromkeys((*portfolio_candidate_exclusions.get(candidate_id, ()), *reasons))
+                )
             auction_candidates = tuple(
                 candidate
                 for candidate in report.candidates
@@ -347,6 +373,7 @@ class AgentService:
                 "features": [_snapshot_features(snapshot) for snapshot in snapshots],
                 "candidate_rejections": report.rejections,
                 "portfolio_candidate_exclusions": portfolio_candidate_exclusions,
+                "directional_confirmation": directional_confirmation,
             }
             portfolio_context = {
                 "equity": str(account.equity),
@@ -370,7 +397,8 @@ class AgentService:
                         "confidence": 1.0,
                         "thesis": (
                             "Cash won because every generated candidate was excluded by "
-                            "pending or existing-underlying portfolio state."
+                            "competition policy, confirmation, pending, or existing-underlying "
+                            "state."
                         ),
                         "evidence": [
                             "The full candidate report was preserved for counterfactual audit."
@@ -382,7 +410,7 @@ class AgentService:
                     },
                     provider="deterministic",
                 )
-            selected = _candidate_by_id(report, envelope.decision.candidate_id)
+            selected = _candidate_by_id(auction_candidates, envelope.decision.candidate_id)
             operational = self.repository.latest_operational_state()
             context = RiskContext(
                 now=now,
@@ -463,6 +491,7 @@ class AgentService:
                 reconciliation_incidents=reconciliation_incidents,
                 lifecycle_events=lifecycle_events,
                 portfolio_candidate_exclusions=portfolio_candidate_exclusions,
+                directional_confirmation=directional_confirmation,
                 daily_loss_control=daily_loss_evidence,
             )
             self.repository.complete_run(run_id, completed_at=now, passport=passport)
@@ -818,9 +847,11 @@ def _cycle_key(now: datetime, mode: RunMode) -> str:
     return f"{mode.value}:{bucket.isoformat()}"
 
 
-def _candidate_by_id(report: CandidateBuildReport, candidate_id: str | None) -> Candidate | None:
+def _candidate_by_id(
+    candidates: tuple[Candidate, ...], candidate_id: str | None
+) -> Candidate | None:
     return next(
-        (candidate for candidate in report.candidates if candidate.candidate_id == candidate_id),
+        (candidate for candidate in candidates if candidate.candidate_id == candidate_id),
         None,
     )
 
@@ -848,6 +879,7 @@ def _passport(
     reconciliation_incidents: tuple[str, ...],
     lifecycle_events: tuple[dict[str, Any], ...],
     portfolio_candidate_exclusions: dict[str, tuple[str, ...]],
+    directional_confirmation: dict[str, dict[str, Any]],
     daily_loss_control: dict[str, Any],
 ) -> dict[str, Any]:
     candidates = [candidate.model_dump(mode="json") for candidate in report.candidates]
@@ -892,6 +924,7 @@ def _passport(
         "evidence": [_snapshot_features(snapshot) for snapshot in snapshots],
         "candidate_rejections": report.rejections,
         "portfolio_candidate_exclusions": portfolio_candidate_exclusions,
+        "directional_confirmation": directional_confirmation,
         "candidates": candidates,
         "auction": auction.model_dump(mode="json"),
         "decision": envelope.decision.model_dump(mode="json"),
@@ -982,6 +1015,88 @@ def _portfolio_candidate_exclusions(
         if reasons:
             exclusions[candidate.candidate_id] = tuple(reasons)
     return exclusions
+
+
+def _directional_policy_exclusions(
+    candidates: tuple[Candidate, ...],
+    *,
+    snapshots: list[UnderlyingSnapshot],
+    repository: AuditRepository,
+    run_id: str,
+    mode: RunMode,
+    now: datetime,
+) -> tuple[dict[str, tuple[str, ...]], dict[str, dict[str, Any]]]:
+    exclusions: dict[str, tuple[str, ...]] = {}
+    evidence: dict[str, dict[str, Any]] = {}
+    snapshots_by_symbol = {snapshot.symbol: snapshot for snapshot in snapshots}
+    for candidate in candidates:
+        if candidate.action is Action.INDEX_CONDOR:
+            exclusions[candidate.candidate_id] = ("competition_directional_only_policy",)
+            evidence[candidate.candidate_id] = {
+                "passed": False,
+                "reason": "competition_directional_only_policy",
+                "current_cycle_at": now.isoformat(),
+            }
+            continue
+        if candidate.action not in {Action.CALL_DEBIT_SPREAD, Action.PUT_DEBIT_SPREAD}:
+            continue
+        symbol = candidate.structure.underlying
+        current = snapshots_by_symbol.get(symbol)
+        prior = repository.prior_market_observation(
+            symbol=symbol,
+            mode=mode,
+            exclude_run_id=run_id,
+            before_cycle_at=now,
+        )
+        reason = _directional_confirmation_reason(current=current, prior=prior, now=now)
+        item: dict[str, Any] = {
+            "passed": reason is None,
+            "reason": reason or "two_cycle_direction_confirmed",
+            "current_cycle_at": now.isoformat(),
+            "current_observed_at": current.observed_at.isoformat() if current else None,
+            "current_trend_return_pct": str(current.trend_return_pct) if current else None,
+            "previous_cycle_at": prior.cycle_at.isoformat() if prior else None,
+            "previous_observed_at": prior.observed_at.isoformat() if prior else None,
+            "previous_trend_return_pct": (
+                str(prior.snapshot.trend_return_pct) if prior and prior.snapshot else None
+            ),
+            "previous_validation_error": prior.validation_error if prior else None,
+        }
+        evidence[candidate.candidate_id] = item
+        if reason is not None:
+            exclusions[candidate.candidate_id] = (reason,)
+    return exclusions, evidence
+
+
+def _directional_confirmation_reason(
+    *,
+    current: UnderlyingSnapshot | None,
+    prior: PriorMarketObservation | None,
+    now: datetime,
+) -> str | None:
+    if current is None or prior is None:
+        return "directional_confirmation_missing_history"
+    if prior.snapshot is None:
+        return "directional_confirmation_malformed_history"
+    if abs(current.trend_return_pct) < Decimal("0.004"):
+        return "directional_confirmation_current_below_threshold"
+    current_bucket = _normal_cycle_bucket(now)
+    prior_bucket = _normal_cycle_bucket(prior.cycle_at)
+    gap = current_bucket - prior_bucket
+    if gap < DIRECTION_CONFIRMATION_MIN_GAP or gap > DIRECTION_CONFIRMATION_MAX_GAP:
+        return "directional_confirmation_stale_or_nonconsecutive"
+    previous_trend = prior.snapshot.trend_return_pct
+    current_trend = current.trend_return_pct
+    if abs(previous_trend) < Decimal("0.004"):
+        return "directional_confirmation_previous_below_threshold"
+    if (previous_trend > 0) != (current_trend > 0):
+        return "directional_confirmation_direction_reversed"
+    return None
+
+
+def _normal_cycle_bucket(at: datetime) -> datetime:
+    minute = at.minute - at.minute % 5
+    return at.astimezone(UTC).replace(minute=minute, second=0, microsecond=0)
 
 
 def _snapshot_features(snapshot: UnderlyingSnapshot) -> dict[str, Any]:

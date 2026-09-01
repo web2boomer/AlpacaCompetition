@@ -62,6 +62,14 @@ Entries also require at least 30 minutes before the earliest of the model hold, 
 daily hard exit, and Thursday forced flatten. Soft maximum-hold/profit exits use quote-aware
 backoff, while urgent safety exits retain aggressive bounded concessions.
 
+During the final September 2–3 competition recovery window, the production selector is
+directional-only for new entries. Condors remain in the complete candidate report for audit and
+counterfactual analysis but are deterministically excluded before model selection. Directional
+spreads require two consecutive completed five-minute observations with the same direction and at
+least 0.40% absolute return from previous close; missing, reversed, weak, or stale history abstains.
+Production entry authority is additionally restricted to 09:45–14:30 ET. These selector controls do
+not weaken reconciliation or lifecycle ownership of previously established structures.
+
 The daily-loss control is persistent and session-scoped. A raw 3.00% breach immediately
 freezes entries, but a clean defined-risk book is force-closed only after a second account
 observation and complete fresh executable leg quotes validate a plausible loss. A loss beyond

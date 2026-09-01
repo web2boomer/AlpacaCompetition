@@ -108,6 +108,64 @@ def test_structure_closes_at_maximum_holding_time_without_waiting_for_price(
     assert signal.urgency == "soft"
 
 
+def test_directional_debit_take_profit_and_stop_are_executable_quote_driven(
+    directional_candidate,
+) -> None:
+    opened_at = datetime(2026, 8, 31, 14, tzinfo=UTC)
+    managed = _managed(directional_candidate, opened_at=opened_at)
+    long_leg = next(leg for leg in directional_candidate.structure.legs if leg.side.value == "buy")
+    short_leg = next(
+        leg for leg in directional_candidate.structure.legs if leg.side.value == "sell"
+    )
+
+    def quotes(long_bid: Decimal, short_ask: Decimal):
+        return {
+            long_leg.symbol: OptionQuote(
+                symbol=long_leg.symbol,
+                underlying=long_leg.underlying,
+                expiration=long_leg.expiration,
+                right=long_leg.right,
+                strike=long_leg.strike,
+                bid=long_bid,
+                ask=long_bid + Decimal("0.10"),
+                volume=100,
+                implied_volatility=Decimal("0.20"),
+                observed_at=opened_at,
+            ),
+            short_leg.symbol: OptionQuote(
+                symbol=short_leg.symbol,
+                underlying=short_leg.underlying,
+                expiration=short_leg.expiration,
+                right=short_leg.right,
+                strike=short_leg.strike,
+                bid=max(Decimal("0.01"), short_ask - Decimal("0.10")),
+                ask=short_ask,
+                volume=100,
+                implied_volatility=Decimal("0.20"),
+                observed_at=opened_at,
+            ),
+        }
+
+    take_profit = structure_exit_signal(
+        managed,
+        quotes=quotes(Decimal("4.00"), Decimal("0.20")),
+        now=opened_at + timedelta(minutes=30),
+    )
+    stop = structure_exit_signal(
+        managed,
+        quotes=quotes(Decimal("0.20"), Decimal("0.15")),
+        now=opened_at + timedelta(minutes=30),
+    )
+    timed = structure_exit_signal(
+        replace(managed, maximum_holding_minutes=60),
+        quotes={},
+        now=opened_at + timedelta(minutes=60),
+    )
+    assert (take_profit.should_close, take_profit.reason) == (True, "debit_take_profit")
+    assert (stop.should_close, stop.reason) == (True, "debit_stop_loss")
+    assert (timed.should_close, timed.reason) == (True, "maximum_holding_time")
+
+
 def test_daily_hard_boundary_is_urgent_and_prevents_overnight_roll(replay_candidate) -> None:
     opened_at = datetime(2026, 8, 31, 14, tzinfo=UTC)
     signal = structure_exit_signal(

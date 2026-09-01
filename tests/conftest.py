@@ -54,3 +54,22 @@ async def replay_candidate(replay_adapter: ReplayAlpacaAdapter):
     report = build_candidates(snapshots, chains, replay_adapter.observed_at)
     assert report.candidates
     return report.candidates[0]
+
+
+@pytest_asyncio.fixture
+async def directional_candidate(replay_adapter: ReplayAlpacaAdapter):
+    snapshots = []
+    chains = {}
+    for symbol in ("SPY", "QQQ", "IWM"):
+        chain = await replay_adapter.option_chain(symbol)
+        snapshot = await replay_adapter.underlying_snapshot(symbol)
+        chains[symbol] = chain
+        snapshots.append(infer_atm_implied_move(snapshot, chain))
+    report = build_candidates(snapshots, chains, replay_adapter.observed_at)
+    candidate = next(
+        item
+        for item in report.candidates
+        if item.action.value in {"call_debit_spread", "put_debit_spread"}
+    )
+    assert not candidate.structure.is_credit
+    return candidate

@@ -250,6 +250,21 @@ class CapturingReplayModel:
         )
 
 
+class DirectionalReplayModel(ReplayModelProvider):
+    async def decide(self, *, candidates, market_context, portfolio_context):
+        directional = tuple(
+            candidate
+            for candidate in candidates
+            if candidate.action.value in {"call_debit_spread", "put_debit_spread"}
+        )
+        assert directional
+        return await super().decide(
+            candidates=directional,
+            market_context=market_context,
+            portfolio_context=portfolio_context,
+        )
+
+
 def live_style_risk_summary(*, open_underlyings, pending_underlyings=frozenset()):
     return {
         "peak_equity": Decimal("100000"),
@@ -391,6 +406,78 @@ async def test_duplicate_cycle_and_order_are_suppressed(
     assert first.run_id == second.run_id
     assert not second.created
     assert len(replay_adapter.submitted_orders) == 1
+
+
+@pytest.mark.asyncio
+async def test_directional_entry_fill_take_profit_atomic_close_and_terminal_normalization(
+    settings, repository, replay_adapter
+) -> None:
+    service = AgentService(settings, repository)
+    opened = await service.run_cycle(
+        adapter=replay_adapter,
+        model=DirectionalReplayModel(),
+        now=replay_adapter.observed_at,
+        mode=RunMode.REPLAY,
+    )
+    assert opened.order_submitted
+    selected = next(
+        candidate
+        for candidate in opened.passport["candidates"]
+        if candidate["candidate_id"] == opened.passport["decision"]["candidate_id"]
+    )
+    assert selected["action"] in {"call_debit_spread", "put_debit_spread"}
+    assert len(replay_adapter.submitted_requests) == 1
+    assert len(replay_adapter.submitted_requests[0].legs) == 2
+    assert replay_adapter.submitted_orders[0].status == "filled"
+
+    replay_adapter.data["positions"] = [
+        {
+            "asset_id": leg["symbol"],
+            "symbol": leg["symbol"],
+            "qty": "1" if leg["side"] == "buy" else "-1",
+        }
+        for leg in selected["structure"]["legs"]
+    ]
+    chain = replay_adapter.data["chains"][selected["structure"]["underlying"]]
+    for leg in selected["structure"]["legs"]:
+        quote = next(item for item in chain if item["symbol"] == leg["symbol"])
+        if leg["side"] == "buy":
+            quote.update(bid="4.00", ask="4.10")
+        else:
+            quote.update(bid="0.10", ask="0.20")
+
+    closing = await service.run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at + timedelta(minutes=5),
+        mode=RunMode.REPLAY,
+    )
+    close_requests = [
+        request for request in replay_adapter.submitted_requests if request.is_closing
+    ]
+    assert len(close_requests) == 1
+    assert len(close_requests[0].legs) == 2
+    assert (
+        close_requests[0].parent_client_order_id
+        == replay_adapter.submitted_requests[0].client_order_id
+    )
+    assert all(leg.position_intent.value.endswith("_to_close") for leg in close_requests[0].legs)
+    assert any(
+        event["event"] == "position_close_submitted" and event["reason"] == "debit_take_profit"
+        for event in closing.passport["operational_state"]["lifecycle_events"]
+    )
+
+    replay_adapter.data["positions"] = []
+    request_count = len(replay_adapter.submitted_requests)
+    normalized = await service.run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at + timedelta(minutes=10),
+        mode=RunMode.REPLAY,
+    )
+    assert len(replay_adapter.submitted_requests) == request_count
+    assert repository.open_managed_structures() == ()
+    assert normalized.passport["operational_state"]["reconciliation_clean"] is True
 
 
 @pytest.mark.asyncio

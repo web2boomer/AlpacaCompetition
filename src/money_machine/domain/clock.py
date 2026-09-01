@@ -20,6 +20,8 @@ BASELINE_EQUITY = Decimal("100000.00")
 ScoringWindowState = Literal["pre_scoring", "scoring", "eod_measurement", "post_scoring"]
 MarketSessionPhase = Literal["market_hours", "extended_hours", "overnight"]
 NEW_YORK = ZoneInfo("America/New_York")
+DAILY_ENTRY_START_TIME = time(9, 45)
+DAILY_ENTRY_CUTOFF_TIME = time(14, 30)
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +65,15 @@ def market_session_phase(at: datetime) -> MarketSessionPhase:
     if time(4) <= wall_time < time(9, 30) or time(16) <= wall_time < time(20):
         return "extended_hours"
     return "overnight"
+
+
+def competition_entry_window_open(at: datetime) -> bool:
+    """Return whether a new competition entry may be considered at this wall-clock time."""
+    if at.tzinfo is None or at.utcoffset() is None:
+        raise ValueError("competition entry window requires a timezone-aware timestamp")
+    local = at.astimezone(NEW_YORK)
+    wall_time = local.time().replace(tzinfo=None)
+    return local.weekday() < 5 and DAILY_ENTRY_START_TIME <= wall_time < DAILY_ENTRY_CUTOFF_TIME
 
 
 def competition_clock(at: datetime, *, has_exposure: bool) -> CompetitionClockSnapshot:

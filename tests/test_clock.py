@@ -10,6 +10,7 @@ from money_machine.domain.clock import (
     NEW_ENTRY_CUTOFF,
     SCORING_STARTS_AT,
     competition_clock,
+    competition_entry_window_open,
     is_official_performance_observation,
     market_session_phase,
 )
@@ -119,3 +120,17 @@ def test_authoritative_equity_lock_precedes_formal_hackathon_end() -> None:
 )
 def test_market_session_phase(moment, phase) -> None:
     assert market_session_phase(moment) == phase
+
+
+@pytest.mark.parametrize(
+    ("moment", "open_for_entry"),
+    [
+        (datetime(2026, 9, 2, 13, 44, 59, tzinfo=UTC), False),
+        (datetime(2026, 9, 2, 13, 45, tzinfo=UTC), True),
+        (datetime(2026, 9, 2, 18, 29, 59, tzinfo=UTC), True),
+        (datetime(2026, 9, 2, 18, 30, tzinfo=UTC), False),
+        (datetime(2026, 9, 5, 14, 0, tzinfo=UTC), False),
+    ],
+)
+def test_competition_daily_entry_window_boundaries(moment, open_for_entry) -> None:
+    assert competition_entry_window_open(moment) is open_for_entry

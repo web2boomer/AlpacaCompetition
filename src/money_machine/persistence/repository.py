@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
+from pydantic import ValidationError
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.exc import IntegrityError
 
@@ -71,6 +72,14 @@ class DailyLossControl:
     defined_loss_envelope: Decimal
     quote_quality_passed: bool
     reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class PriorMarketObservation:
+    cycle_at: datetime
+    observed_at: datetime
+    snapshot: UnderlyingSnapshot | None
+    validation_error: str | None = None
 
 
 class AuditRepository:
@@ -240,6 +249,47 @@ class AuditRepository:
                         raw_hash=_hash(features),
                     )
                 )
+
+    def prior_market_observation(
+        self,
+        *,
+        symbol: str,
+        mode: RunMode,
+        exclude_run_id: str,
+        before_cycle_at: datetime,
+    ) -> PriorMarketObservation | None:
+        """Return the immediately preceding completed observation for one scheduler stream."""
+        with self.database.session() as session:
+            row = session.execute(
+                select(MarketSnapshotORM, AgentRunORM.started_at)
+                .join(AgentRunORM, AgentRunORM.id == MarketSnapshotORM.agent_run_id)
+                .where(
+                    MarketSnapshotORM.symbol == symbol,
+                    MarketSnapshotORM.agent_run_id != exclude_run_id,
+                    AgentRunORM.mode == mode.value,
+                    AgentRunORM.status == "completed",
+                    AgentRunORM.started_at < before_cycle_at,
+                )
+                .order_by(desc(AgentRunORM.started_at), desc(MarketSnapshotORM.id))
+                .limit(1)
+            ).first()
+        if row is None:
+            return None
+        snapshot_row, cycle_at = row
+        features = dict(snapshot_row.features_json)
+        features.pop("richness_ratio", None)
+        try:
+            snapshot = UnderlyingSnapshot.model_validate(features)
+            validation_error = None
+        except ValidationError as exc:
+            snapshot = None
+            validation_error = type(exc).__name__
+        return PriorMarketObservation(
+            cycle_at=cycle_at,
+            observed_at=snapshot_row.observed_at,
+            snapshot=snapshot,
+            validation_error=validation_error,
+        )
 
     def persist_candidates(self, run_id: str, candidates: tuple[Candidate, ...]) -> None:
         with self.database.session() as session:
