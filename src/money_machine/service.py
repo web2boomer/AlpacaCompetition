@@ -571,9 +571,13 @@ class AgentService:
                         order.client_order_id, status=broker_status, now=now
                     )
                     if broker_status == "filled":
-                        self.repository.mark_managed_structure_closed(
-                            order.candidate_id.removesuffix(":close"), now=now
+                        parent_closed = self.repository.mark_managed_structure_closed(
+                            order.candidate_id.removesuffix(":close"),
+                            now=now,
+                            parent_client_order_id=order.parent_client_order_id,
                         )
+                        if not parent_closed:
+                            incidents.append("ambiguous_filled_close_parent")
                     events.append(
                         {
                             "event": "closing_order_terminal_reconciled",
@@ -581,6 +585,10 @@ class AgentService:
                             "remaining_quantity": order.remaining_quantity,
                         }
                     )
+                    continue
+                if order.parent_client_order_id is None:
+                    incidents.append("ambiguous_closing_order_parent")
+                    active_closing_candidates.add(order.candidate_id.removesuffix(":close"))
                     continue
             cutoff_cancel = not order.is_closing and not allow_new_entries
             urgent_close = bool(
@@ -719,7 +727,28 @@ class AgentService:
                 )
                 continue
             if not all(present):
+                self.repository.mark_managed_structure_externally_reduced(
+                    managed.client_order_id, now=now
+                )
                 incidents.append("rejected_close_incomplete_structure")
+                events.append(
+                    {
+                        "event": "managed_structure_externally_reduced",
+                        "client_order_id": managed.client_order_id,
+                        "candidate_id": managed.candidate_id,
+                        "present_leg_symbols": [
+                            symbol
+                            for symbol, is_present in zip(leg_symbols, present, strict=True)
+                            if is_present
+                        ],
+                        "missing_leg_symbols": [
+                            symbol
+                            for symbol, is_present in zip(leg_symbols, present, strict=True)
+                            if not is_present
+                        ],
+                        "risk_treatment": "original_defined_loss_retained",
+                    }
+                )
                 continue
             if not market_open:
                 continue

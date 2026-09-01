@@ -47,6 +47,7 @@ class ManagedOrder:
     submitted_at: datetime
     is_credit: bool
     is_closing: bool
+    parent_client_order_id: str | None
     exit_reason: str | None
     exit_urgency: str | None
     legs: tuple[OptionLeg, ...]
@@ -208,6 +209,7 @@ def replacement_request(
         environment_role=environment_role,
         attempt=order.attempt + 1 if attempt is None else attempt,
         is_closing=order.is_closing,
+        parent_client_order_id=order.parent_client_order_id,
         exit_reason=order.exit_reason,
         exit_urgency=order.exit_urgency,
     )
@@ -360,6 +362,7 @@ def close_request(
         legs=tuple(close_legs),
         environment_role=environment_role,
         is_closing=True,
+        parent_client_order_id=managed.client_order_id,
         exit_reason=exit_reason,
         exit_urgency=exit_urgency,
     )

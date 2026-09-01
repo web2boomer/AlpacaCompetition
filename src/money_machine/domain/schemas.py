@@ -221,6 +221,7 @@ class BrokerOrderRequest(StrictModel):
     environment_role: str
     attempt: int = Field(default=0, ge=0, le=2)
     is_closing: bool = False
+    parent_client_order_id: str | None = None
     exit_reason: str | None = None
     exit_urgency: Literal["soft", "urgent"] | None = None
 
@@ -232,6 +233,8 @@ class BrokerOrderRequest(StrictModel):
         required = closing_intents if self.is_closing else opening_intents
         if not intents or not intents.issubset(required):
             raise ValueError("order leg intents do not match entry/close authority")
+        if self.is_closing != bool(self.parent_client_order_id):
+            raise ValueError("closing orders require exactly one managed opening parent")
         return self
 
 

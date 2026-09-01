@@ -83,6 +83,13 @@ async def seed_pending_close(settings, repository, replay_adapter):
     close_request = replay_adapter.submitted_requests[-1]
     assert close_request.is_closing
     with repository.database.session() as session:
+        opening_order = session.scalar(
+            select(BrokerOrderORM).where(
+                BrokerOrderORM.candidate_id == close_request.candidate_id.removesuffix(":close")
+            )
+        )
+        assert opening_order is not None
+        assert close_request.parent_client_order_id == opening_order.client_order_id
         close_order = session.scalar(
             select(BrokerOrderORM).where(
                 BrokerOrderORM.client_order_id == close_request.client_order_id
@@ -93,6 +100,98 @@ async def seed_pending_close(settings, repository, replay_adapter):
         close_order.submitted_at = replay_adapter.observed_at - timedelta(minutes=5)
     replay_adapter.canceled_order_ids.clear()
     return service, close_request, replay_adapter.submitted_orders[-1].broker_order_id
+
+
+@pytest.mark.asyncio
+async def test_externally_reduced_structure_stays_fail_closed_and_retains_defined_loss(
+    settings, repository, replay_adapter
+) -> None:
+    opening = await seed_managed_position(settings, repository, replay_adapter)
+    original_risk = Decimal(opening.passport["risk"]["awarded_risk"])
+    missing_symbol = replay_adapter.data["positions"].pop()["symbol"]
+
+    outcome = await AgentService(production_settings(settings), repository).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at,
+        mode=RunMode.LIVE,
+    )
+
+    assert outcome.passport["operational_state"]["reconciliation_clean"] is False
+    assert (
+        "rejected_close_incomplete_structure" in outcome.passport["operational_state"]["incidents"]
+    )
+    event = next(
+        item
+        for item in outcome.passport["operational_state"]["lifecycle_events"]
+        if item["event"] == "managed_structure_externally_reduced"
+    )
+    assert event["missing_leg_symbols"] == [missing_symbol]
+    assert event["risk_treatment"] == "original_defined_loss_retained"
+    managed = repository.open_managed_structures()
+    assert len(managed) == 1
+    assert managed[0].status == "externally_reduced"
+    summary = repository.portfolio_risk_summary(Decimal("100000"))
+    assert summary["total_open_defined_loss"] == original_risk
+    assert summary["open_alpha_structures"] == 1
+
+    rerun = await AgentService(production_settings(settings), repository).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at + timedelta(minutes=5),
+        mode=RunMode.LIVE,
+    )
+    assert "rejected_close_incomplete_structure" in rerun.passport["operational_state"]["incidents"]
+    assert (
+        repository.portfolio_risk_summary(Decimal("100000"))["total_open_defined_loss"]
+        == original_risk
+    )
+
+
+@pytest.mark.asyncio
+async def test_filled_close_parent_link_is_exact_and_ambiguous_fallback_fails_closed(
+    settings, repository, replay_adapter
+) -> None:
+    opening = await seed_managed_position(settings, repository, replay_adapter)
+    now = replay_adapter.observed_at
+    with repository.database.session() as session:
+        parent = session.scalar(
+            select(BrokerOrderORM).where(BrokerOrderORM.agent_run_id == opening.run_id)
+        )
+        assert parent is not None
+        sibling = BrokerOrderORM(
+            agent_run_id=parent.agent_run_id,
+            candidate_id=parent.candidate_id,
+            client_order_id="mm-comp-overlap-sibling",
+            broker_order_id="broker-overlap-sibling",
+            status="filled",
+            quantity=parent.quantity,
+            limit_price=parent.limit_price,
+            environment_role=parent.environment_role,
+            attempt=0,
+            submitted_at=parent.submitted_at,
+            last_seen_at=parent.last_seen_at,
+            raw_json=parent.raw_json,
+        )
+        session.add(sibling)
+        parent_client_order_id = parent.client_order_id
+        candidate_id = parent.candidate_id
+
+    assert not repository.mark_managed_structure_closed(candidate_id, now=now)
+    assert repository.mark_managed_structure_closed(
+        candidate_id,
+        now=now,
+        parent_client_order_id=parent_client_order_id,
+    )
+    with repository.database.session() as session:
+        statuses = {
+            order.client_order_id: order.status
+            for order in session.scalars(
+                select(BrokerOrderORM).where(BrokerOrderORM.candidate_id == candidate_id)
+            )
+        }
+    assert statuses[parent_client_order_id] == "closed"
+    assert statuses["mm-comp-overlap-sibling"] == "filled"
 
 
 @pytest.mark.asyncio

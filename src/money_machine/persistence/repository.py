@@ -364,6 +364,7 @@ class AuditRepository:
                         "request": {
                             "is_credit": request.is_credit,
                             "is_closing": request.is_closing,
+                            "parent_client_order_id": request.parent_client_order_id,
                             "exit_reason": request.exit_reason,
                             "exit_urgency": request.exit_urgency,
                             "legs": [leg.model_dump(mode="json") for leg in request.legs],
@@ -462,6 +463,30 @@ class AuditRepository:
                 remaining = int(Decimal(str(row.raw_json.get("remaining_quantity", row.quantity))))
                 if remaining < 1:
                     continue
+                parent_client_order_id = (
+                    str(request["parent_client_order_id"])
+                    if request.get("parent_client_order_id")
+                    else None
+                )
+                if bool(request.get("is_closing")) and parent_client_order_id is None:
+                    candidate_id = row.candidate_id.removesuffix(":close")
+                    possible_parents = list(
+                        session.scalars(
+                            select(BrokerOrderORM).where(
+                                BrokerOrderORM.candidate_id == candidate_id,
+                                BrokerOrderORM.status.in_(
+                                    (
+                                        "filled",
+                                        "closing",
+                                        "partially_filled_canceled",
+                                        "externally_reduced",
+                                    )
+                                ),
+                            )
+                        )
+                    )
+                    if len(possible_parents) == 1:
+                        parent_client_order_id = possible_parents[0].client_order_id
                 managed.append(
                     ManagedOrder(
                         agent_run_id=row.agent_run_id,
@@ -476,6 +501,7 @@ class AuditRepository:
                         submitted_at=_safe_datetime(row.submitted_at),
                         is_credit=bool(request.get("is_credit", False)),
                         is_closing=bool(request.get("is_closing", False)),
+                        parent_client_order_id=parent_client_order_id,
                         exit_reason=(
                             str(request["exit_reason"]) if request.get("exit_reason") else None
                         ),
@@ -508,7 +534,9 @@ class AuditRepository:
                     ModelDecisionORM.agent_run_id == BrokerOrderORM.agent_run_id,
                 )
                 .where(
-                    BrokerOrderORM.status.in_(("filled", "closing", "partially_filled_canceled"))
+                    BrokerOrderORM.status.in_(
+                        ("filled", "closing", "partially_filled_canceled", "externally_reduced")
+                    )
                 )
             )
             for order, candidate, structure, decision in rows:
@@ -553,17 +581,49 @@ class AuditRepository:
             order.status = status
             order.last_seen_at = now
 
-    def mark_managed_structure_closed(self, candidate_id: str, *, now: datetime) -> None:
+    def mark_managed_structure_closed(
+        self,
+        candidate_id: str,
+        *,
+        now: datetime,
+        parent_client_order_id: str | None = None,
+    ) -> bool:
         with self.database.session() as session:
-            orders = session.scalars(
-                select(BrokerOrderORM).where(
-                    BrokerOrderORM.candidate_id == candidate_id,
-                    BrokerOrderORM.status.in_(("filled", "closing", "partially_filled_canceled")),
+            query = select(BrokerOrderORM).where(
+                BrokerOrderORM.status.in_(
+                    ("filled", "closing", "partially_filled_canceled", "externally_reduced")
                 )
             )
-            for order in orders:
-                order.status = "closed"
-                order.last_seen_at = now
+            if parent_client_order_id:
+                query = query.where(BrokerOrderORM.client_order_id == parent_client_order_id)
+            else:
+                query = query.where(BrokerOrderORM.candidate_id == candidate_id)
+            orders = list(session.scalars(query))
+            if len(orders) != 1:
+                return False
+            order = orders[0]
+            if order.candidate_id != candidate_id:
+                return False
+            order.status = "closed"
+            order.last_seen_at = now
+            return True
+
+    def mark_managed_structure_externally_reduced(
+        self, client_order_id: str, *, now: datetime
+    ) -> None:
+        with self.database.session() as session:
+            order = session.scalar(
+                select(BrokerOrderORM).where(
+                    BrokerOrderORM.client_order_id == client_order_id,
+                    BrokerOrderORM.status.in_(
+                        ("filled", "closing", "partially_filled_canceled", "externally_reduced")
+                    ),
+                )
+            )
+            if order is None:
+                raise KeyError(client_order_id)
+            order.status = "externally_reduced"
+            order.last_seen_at = now
 
     def reconcile_filled_closing_parents(self, *, now: datetime) -> tuple[str, ...]:
         reconciled: list[str] = []
@@ -576,20 +636,22 @@ class AuditRepository:
                 if not isinstance(request, dict) or not request.get("is_closing"):
                     continue
                 candidate_id = closing_order.candidate_id.removesuffix(":close")
-                parent_orders = session.scalars(
-                    select(BrokerOrderORM).where(
-                        BrokerOrderORM.candidate_id == candidate_id,
-                        BrokerOrderORM.status.in_(
-                            ("filled", "closing", "partially_filled_canceled")
-                        ),
+                parent_client_order_id = request.get("parent_client_order_id")
+                query = select(BrokerOrderORM).where(
+                    BrokerOrderORM.status.in_(
+                        ("filled", "closing", "partially_filled_canceled", "externally_reduced")
                     )
                 )
-                changed = False
-                for parent_order in parent_orders:
-                    parent_order.status = "closed"
-                    parent_order.last_seen_at = now
-                    changed = True
-                if changed:
+                if parent_client_order_id:
+                    query = query.where(
+                        BrokerOrderORM.client_order_id == str(parent_client_order_id)
+                    )
+                else:
+                    query = query.where(BrokerOrderORM.candidate_id == candidate_id)
+                parent_orders = list(session.scalars(query))
+                if len(parent_orders) == 1 and parent_orders[0].candidate_id == candidate_id:
+                    parent_orders[0].status = "closed"
+                    parent_orders[0].last_seen_at = now
                     reconciled.append(candidate_id)
         return tuple(dict.fromkeys(reconciled))
 
@@ -660,6 +722,7 @@ class AuditRepository:
                 "partially_filled_canceled",
                 "filled",
                 "closing",
+                "externally_reduced",
             )
             open_loss = session.scalar(
                 select(func.coalesce(func.sum(RiskDecisionORM.awarded_risk), 0))
@@ -728,6 +791,7 @@ class AuditRepository:
                                 "partially_filled_canceled",
                                 "filled",
                                 "closing",
+                                "externally_reduced",
                             ]
                         )
                     )
@@ -987,13 +1051,19 @@ class AuditRepository:
                                 "partially_filled_canceled",
                                 "filled",
                                 "closing",
+                                "externally_reduced",
                             )
                         )
                     )
                     .order_by(BrokerOrderORM.submitted_at, BrokerOrderORM.id)
                 )
             )
-            established_statuses = {"filled", "closing", "partially_filled_canceled"}
+            established_statuses = {
+                "filled",
+                "closing",
+                "partially_filled_canceled",
+                "externally_reduced",
+            }
             for local_order, structure in exposure_rows:
                 if local_order.status in established_statuses:
                     _reserve_structure_positions(
