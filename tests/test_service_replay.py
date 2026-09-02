@@ -228,13 +228,15 @@ async def test_replay_end_to_end_generates_decision_passport(
 class CapturingReplayModel:
     def __init__(self, preferred_underlying=None) -> None:
         self.candidates = ()
+        self.market_context = {}
         self.preferred_underlying = preferred_underlying
         self.calls = 0
 
     async def decide(self, *, candidates, market_context, portfolio_context):
-        del market_context, portfolio_context
+        del portfolio_context
         self.calls += 1
         self.candidates = tuple(candidates)
+        self.market_context = market_context
         ranked = self.candidates
         if self.preferred_underlying is not None:
             selected = next(
@@ -312,6 +314,8 @@ async def test_portfolio_filter_excludes_qqq_but_preserves_full_report_and_selec
     assert outcome.approved
     assert outcome.order_submitted
     assert outcome.passport["decision"]["candidate_id"].startswith("spy-")
+    assert "candidate_rejections" not in model.market_context
+    assert outcome.passport["candidate_rejections"]
     assert outcome.passport["auction"]["ranked_candidate_ids"] == [
         candidate.candidate_id for candidate in model.candidates
     ]

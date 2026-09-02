@@ -371,7 +371,6 @@ class AgentService:
             market_context = {
                 "observed_at": now.isoformat(),
                 "features": [_snapshot_features(snapshot) for snapshot in snapshots],
-                "candidate_rejections": report.rejections,
                 "portfolio_candidate_exclusions": portfolio_candidate_exclusions,
                 "directional_confirmation": directional_confirmation,
             }
@@ -944,6 +943,9 @@ def _passport(
             "selection_attempts": envelope.selection_attempts,
             "candidate_id_retry_used": envelope.candidate_id_retry_used,
             "initial_raw_response_hash": envelope.initial_raw_response_hash,
+            "retry_raw_response_hash": envelope.retry_raw_response_hash,
+            "deterministic_fallback_used": envelope.deterministic_fallback_used,
+            "selection_provenance": envelope.selection_provenance,
             "fallback_used": envelope.validation_error is not None,
             "error_type": envelope.validation_error,
         },

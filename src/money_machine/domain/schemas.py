@@ -172,6 +172,9 @@ class ModelDecisionEnvelope(StrictModel):
     selection_attempts: int = Field(default=1, ge=1, le=2)
     candidate_id_retry_used: bool = False
     initial_raw_response_hash: str | None = None
+    retry_raw_response_hash: str | None = None
+    deterministic_fallback_used: bool = False
+    selection_provenance: Literal["model", "corrective_retry", "deterministic_top_ranked"] = "model"
 
 
 class RiskCheck(StrictModel):

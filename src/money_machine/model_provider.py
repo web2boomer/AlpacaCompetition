@@ -135,8 +135,12 @@ class OpenAIModelProvider:
         allowed_candidate_ids = tuple(candidate.candidate_id for candidate in candidates)
         prompt = {
             "instruction": (
-                "Choose exactly one candidate_id from candidates or abstain. Never invent strikes, "
-                "quantity, account, order type, or broker parameters. Confidence "
+                "Every supplied candidate already passed its strategy-specific deterministic "
+                "construction gates. Choose exactly one candidate_id from candidates or abstain "
+                "only when none fits the observed regime. For call_debit_spread and "
+                "put_debit_spread, richness_ratio is not an eligibility gate and rejection "
+                "evidence for condors or other structures must not be applied to them. Never "
+                "invent strikes, quantity, account, order type, or broker parameters. Confidence "
                 "cannot override gates."
             ),
             "market": market_context,
@@ -173,17 +177,20 @@ class OpenAIModelProvider:
 
         try:
             first = await request_decision(prompt)
-            if (
-                first.decision.action is Action.ABSTAIN
-                or first.decision.candidate_id in allowed_candidate_ids
+            if not candidates or (
+                first.decision.action is not Action.ABSTAIN
+                and first.decision.candidate_id in allowed_candidate_ids
             ):
                 return first
             retry_prompt = {
                 **prompt,
                 "instruction": (
-                    "The previous candidate_id was invalid. Choose exactly one candidate_id "
-                    "from allowed_candidate_ids, copied character-for-character, or abstain. "
-                    "Do not alter punctuation, invent an ID, or choose any excluded candidate."
+                    "The previous response did not select an eligible candidate. Every candidate "
+                    "listed here already passed deterministic candidate, event, liquidity, "
+                    "directional-confirmation, and portfolio-eligibility gates. You are the "
+                    "ranker, not the gatekeeper: choose exactly one candidate_id from "
+                    "allowed_candidate_ids, copied character-for-character. Do not abstain, "
+                    "invent a threshold, alter punctuation, or choose an excluded candidate."
                 ),
                 "allowed_candidate_ids": allowed_candidate_ids,
                 "previous_invalid_candidate_id": first.decision.candidate_id,
@@ -193,19 +200,45 @@ class OpenAIModelProvider:
                 "selection_attempts": 2,
                 "candidate_id_retry_used": True,
                 "initial_raw_response_hash": first.raw_response_hash,
+                "retry_raw_response_hash": retry.raw_response_hash,
+                "selection_provenance": "corrective_retry",
             }
             if (
-                retry.decision.action is Action.ABSTAIN
-                or retry.decision.candidate_id in allowed_candidate_ids
+                retry.decision.action is not Action.ABSTAIN
+                and retry.decision.candidate_id in allowed_candidate_ids
             ):
                 return retry.model_copy(update=retry_metadata)
+            selected = candidates[0]
+            fallback_confidence = float(selected.minimum_confidence)
+            fallback_regime = {
+                Action.CALL_DEBIT_SPREAD: Regime.DIRECTIONAL_UP,
+                Action.PUT_DEBIT_SPREAD: Regime.DIRECTIONAL_DOWN,
+                Action.INDEX_CONDOR: Regime.CALM,
+            }.get(selected.action, Regime.CALM)
             return retry.model_copy(
                 update={
                     **retry_metadata,
-                    "decision": ModelDecision.abstention(
-                        "Model selected an unknown candidate ID after one retry; cycle abstained."
+                    "decision": ModelDecision(
+                        regime=fallback_regime,
+                        action=selected.action,
+                        candidate_id=selected.candidate_id,
+                        confidence=fallback_confidence,
+                        thesis=(
+                            "Deterministic selector fallback chose the highest-ranked candidate "
+                            "after two invalid model selections."
+                        ),
+                        evidence=(
+                            "The candidate passed every deterministic pre-auction gate.",
+                            "Authoritative risk evaluation remains required before any order.",
+                        ),
+                        invalidation=(
+                            "Any authoritative risk failure retains cash and submits no order.",
+                        ),
+                        maximum_holding_minutes=selected.maximum_holding_minutes or 60,
                     ),
-                    "validation_error": "UnknownCandidateIdAfterRetry",
+                    "validation_error": "DeterministicTopRankedSelectionFallback",
+                    "deterministic_fallback_used": True,
+                    "selection_provenance": "deterministic_top_ranked",
                 }
             )
         except Exception as exc:  # provider failures must fail closed
