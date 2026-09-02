@@ -445,6 +445,7 @@ class AuditRepository:
         client_order_id: str,
         limit_price: Decimal,
         lineage: dict[str, str],
+        time_in_force: str,
         observed_at: datetime,
     ) -> None:
         """Persist an immutable reduce-to-flat intent before broker submission."""
@@ -469,7 +470,7 @@ class AuditRepository:
                             "side": "sell",
                             "quantity": quantity,
                             "order_type": "limit",
-                            "time_in_force": "ioc",
+                            "time_in_force": time_in_force,
                             "extended_hours": False,
                             "lineage": lineage,
                         }

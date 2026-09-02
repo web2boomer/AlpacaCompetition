@@ -290,6 +290,7 @@ class AlpacaMcpV2Adapter:
         quantity: int,
         limit_price: Decimal,
         client_order_id: str,
+        time_in_force: str = "ioc",
     ) -> BrokerOrderResult:
         """Submit one bounded, idempotent regular-session stock sell."""
         payload = _as_dict(
@@ -300,7 +301,7 @@ class AlpacaMcpV2Adapter:
                     "side": "sell",
                     "qty": str(quantity),
                     "type": "limit",
-                    "time_in_force": "ioc",
+                    "time_in_force": time_in_force,
                     "limit_price": str(limit_price),
                     "extended_hours": False,
                     "client_order_id": client_order_id,

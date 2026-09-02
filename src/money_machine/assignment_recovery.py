@@ -39,7 +39,7 @@ RECOVERY_POSITIONS = {
         assigned_leg="IWM260901P00291000",
     ),
     "QQQ": AssignmentSpec(
-        quantity=Decimal("27"),
+        quantity=Decimal("25"),
         parent_client_order_id="mm-comp-81df6bbd24663e7b199558e9",
         parent_broker_order_id="d2f9ef1f-b8d3-4ab6-a0a4-05ea86e98b33",
         assigned_leg="QQQ260901P00708000",
@@ -67,9 +67,12 @@ class RecoveryAdapter(Protocol):
         quantity: int,
         limit_price: Decimal,
         client_order_id: str,
+        time_in_force: str = "ioc",
     ) -> BrokerOrderResult: ...
 
     async def order_by_id(self, broker_order_id: str) -> dict[str, Any]: ...
+
+    async def cancel_order(self, broker_order_id: str) -> None: ...
 
 
 async def guarded_assignment_recovery(
@@ -111,7 +114,7 @@ async def _recover(
         for symbol in RECOVERY_POSITIONS
     }
     run_id, created = repository.begin_run(
-        "assignment-recovery-residual-1:2026-09-02", RunMode.LIVE, now
+        "assignment-recovery-residual-2:2026-09-02", RunMode.LIVE, now
     )
     if not created:
         raise RuntimeError("assignment recovery was already attempted")
@@ -120,7 +123,7 @@ async def _recover(
     for symbol in ("QQQ", "IWM"):
         expected = RECOVERY_POSITIONS[symbol]
         quantity = int(expected.quantity)
-        client_order_id = f"mm-comp-ar2-20260902-{symbol.lower()}"
+        client_order_id = f"mm-comp-ar3-20260902-{symbol.lower()}"
         repository.persist_assignment_recovery_intent(
             run_id,
             symbol=symbol,
@@ -128,6 +131,7 @@ async def _recover(
             client_order_id=client_order_id,
             limit_price=limits[symbol],
             lineage=expected.lineage(),
+            time_in_force="day",
             observed_at=now,
         )
         result = await adapter.place_stock_order(
@@ -135,6 +139,7 @@ async def _recover(
             quantity=quantity,
             limit_price=limits[symbol],
             client_order_id=client_order_id,
+            time_in_force="day",
         )
         if not result.broker_order_id or result.client_order_id != client_order_id:
             raise RuntimeError("broker returned ambiguous assignment recovery identity")
@@ -155,11 +160,8 @@ async def _recover(
             observed_at=datetime.now(UTC),
             broker_payload=_redacted_terminal(terminal),
         )
-        live_orders, live_positions = await asyncio.gather(
-            adapter.orders(status="open"), adapter.positions()
-        )
-        if live_orders:
-            raise RuntimeError(f"{symbol} terminalized with a broker working order")
+        await _wait_for_no_open_orders(adapter, symbol)
+        live_positions = await adapter.positions()
         receipts.append(
             {
                 "symbol": symbol,
@@ -274,7 +276,24 @@ async def _terminal_order(adapter: RecoveryAdapter, broker_order_id: str) -> dic
         if str(order.get("status") or "").lower() in TERMINAL_STATUSES:
             return order
         await asyncio.sleep(0.5)
-    raise RuntimeError("assignment recovery order did not reach a terminal status")
+    order = await adapter.order_by_id(broker_order_id)
+    if str(order.get("status") or "").lower() in TERMINAL_STATUSES:
+        return order
+    await adapter.cancel_order(broker_order_id)
+    for _ in range(20):
+        order = await adapter.order_by_id(broker_order_id)
+        if str(order.get("status") or "").lower() in TERMINAL_STATUSES:
+            return order
+        await asyncio.sleep(0.5)
+    raise RuntimeError("assignment recovery cancel did not reach a terminal status")
+
+
+async def _wait_for_no_open_orders(adapter: RecoveryAdapter, symbol: str) -> None:
+    for _ in range(10):
+        if not await adapter.orders(status="open"):
+            return
+        await asyncio.sleep(0.5)
+    raise RuntimeError(f"{symbol} terminalized with a broker working order")
 
 
 def _redacted_terminal(order: dict[str, Any]) -> dict[str, Any]:

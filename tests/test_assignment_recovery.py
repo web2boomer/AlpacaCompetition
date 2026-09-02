@@ -45,7 +45,7 @@ class FakeAdapter:
         self.open_orders: list[dict[str, object]] = []
         self.initial_positions = [
             {"symbol": "IWM", "qty": "200", "side": "long", "asset_class": "us_equity"},
-            {"symbol": "QQQ", "qty": "27", "side": "long", "asset_class": "us_equity"},
+            {"symbol": "QQQ", "qty": "25", "side": "long", "asset_class": "us_equity"},
         ]
         self.placed: list[dict[str, object]] = []
 
@@ -94,9 +94,12 @@ class FakeAdapter:
             raw={"status": "accepted"},
         )
 
+    async def cancel_order(self, _broker_order_id):
+        raise AssertionError("filled test order must not be canceled")
+
     async def order_by_id(self, broker_order_id):
         symbol = broker_order_id.removeprefix("broker-").upper()
-        quantity = "27" if symbol == "QQQ" else "200"
+        quantity = "25" if symbol == "QQQ" else "200"
         return {
             "id": broker_order_id,
             "status": "filled",
@@ -119,7 +122,8 @@ async def test_guarded_assignment_recovery_fills_exact_inventory_and_audits() ->
     assert receipt["working_orders"] == 0
     assert receipt["incident_cleared_by_command"] is False
     assert [order["symbol"] for order in adapter.placed] == ["QQQ", "IWM"]
-    assert adapter.placed[0]["quantity"] == 27
+    assert adapter.placed[0]["quantity"] == 25
+    assert adapter.placed[0]["time_in_force"] == "day"
     assert adapter.placed[0]["limit_price"] == Decimal("706.85")
     assert adapter.placed[1]["quantity"] == 200
     assert adapter.placed[1]["limit_price"] == Decimal("290.25")
