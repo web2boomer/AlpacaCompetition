@@ -823,7 +823,19 @@ class AuditRepository:
         observed_at = (now or datetime.now(UTC)).astimezone(UTC)
         day_start = observed_at.replace(hour=0, minute=0, second=0, microsecond=0)
         with self.database.session() as session:
-            peak = session.scalar(select(func.max(EquitySnapshotORM.equity))) or fallback_equity
+            peak = (
+                session.scalar(
+                    select(func.max(EquitySnapshotORM.equity))
+                    .join(AgentRunORM, AgentRunORM.id == EquitySnapshotORM.agent_run_id)
+                    .where(
+                        AgentRunORM.status == "completed",
+                        AgentRunORM.passport_json["operational_state"]["reconciliation_clean"]
+                        .as_boolean()
+                        .is_(True),
+                    )
+                )
+                or fallback_equity
+            )
             latest_today = (
                 session.scalar(
                     select(EquitySnapshotORM.equity)

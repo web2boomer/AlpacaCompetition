@@ -1,5 +1,6 @@
 from datetime import timedelta
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from pydantic import SecretStr
@@ -17,6 +18,7 @@ from money_machine.domain.enums import RunMode
 from money_machine.domain.schemas import AccountSnapshot
 from money_machine.model_provider import ReplayModelProvider
 from money_machine.persistence.models import (
+    AgentRunORM,
     BrokerOrderORM,
     EquitySnapshotORM,
     FillORM,
@@ -38,6 +40,52 @@ def production_settings(settings) -> Settings:
         alpaca_expected_account_id=SecretStr("REPLAY-PAPER-ACCOUNT"),
         client_order_prefix="mm-comp",
     )
+
+
+def test_portfolio_peak_ignores_unreconciled_assignment_mark(repository, replay_adapter) -> None:
+    now = replay_adapter.observed_at
+    clean_run_id = str(uuid4())
+    incident_run_id = str(uuid4())
+    with repository.database.session() as session:
+        for run_id, reconciliation_clean, equity in (
+            (clean_run_id, True, Decimal("100053.14")),
+            (incident_run_id, False, Decimal("228875.69")),
+        ):
+            session.add(
+                AgentRunORM(
+                    id=run_id,
+                    cycle_key=f"peak-test:{run_id}",
+                    correlation_id=str(uuid4()),
+                    mode="replay",
+                    status="completed",
+                    started_at=now,
+                    completed_at=now,
+                    passport_json={
+                        "operational_state": {
+                            "reconciliation_clean": reconciliation_clean,
+                        }
+                    },
+                )
+            )
+            session.add(
+                EquitySnapshotORM(
+                    agent_run_id=run_id,
+                    observed_at=now,
+                    equity=equity,
+                    cash=equity,
+                    buying_power=equity,
+                    portfolio_value=equity,
+                    realized_pl=Decimal("0"),
+                    unrealized_pl=Decimal("0"),
+                    peak_equity=equity,
+                    drawdown=Decimal("0"),
+                    official=True,
+                )
+            )
+
+    summary = repository.portfolio_risk_summary(Decimal("100053.14"), now=now)
+
+    assert summary["peak_equity"] == Decimal("100053.14")
 
 
 async def seed_managed_position(settings, repository, replay_adapter, *, quantity: str = "1"):
