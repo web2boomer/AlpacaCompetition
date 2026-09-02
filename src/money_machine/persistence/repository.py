@@ -14,7 +14,9 @@ from money_machine.domain.clock import (
     BASELINE_EQUITY,
     EOD_EQUITY_SNAPSHOT_AT,
     HACKATHON_STARTS_AT,
+    NEW_YORK,
     SCORING_STARTS_AT,
+    is_regular_market_performance_observation,
     scoring_window_state,
 )
 from money_machine.domain.enums import ExecutionState, RunMode
@@ -821,30 +823,42 @@ class AuditRepository:
         self, fallback_equity: Decimal, *, now: datetime | None = None
     ) -> dict[str, Any]:
         observed_at = (now or datetime.now(UTC)).astimezone(UTC)
-        day_start = observed_at.replace(hour=0, minute=0, second=0, microsecond=0)
+        local_date = observed_at.astimezone(NEW_YORK).date()
         with self.database.session() as session:
-            peak = (
-                session.scalar(
-                    select(func.max(EquitySnapshotORM.equity))
+            risk_equity_snapshots = list(
+                session.scalars(
+                    select(EquitySnapshotORM)
                     .join(AgentRunORM, AgentRunORM.id == EquitySnapshotORM.agent_run_id)
                     .where(
+                        EquitySnapshotORM.official,
                         AgentRunORM.status == "completed",
                         AgentRunORM.passport_json["operational_state"]["reconciliation_clean"]
                         .as_boolean()
                         .is_(True),
                     )
+                    .order_by(EquitySnapshotORM.observed_at, EquitySnapshotORM.id)
                 )
-                or fallback_equity
             )
-            latest_today = (
-                session.scalar(
-                    select(EquitySnapshotORM.equity)
-                    .where(EquitySnapshotORM.observed_at >= day_start)
-                    .order_by(EquitySnapshotORM.observed_at)
-                    .limit(1)
-                )
-                or fallback_equity
+            risk_equity_snapshots = [
+                snapshot
+                for snapshot in risk_equity_snapshots
+                if is_regular_market_performance_observation(_safe_datetime(snapshot.observed_at))
+            ]
+            peak = max(
+                BASELINE_EQUITY,
+                fallback_equity,
+                *(snapshot.equity for snapshot in risk_equity_snapshots),
             )
+            first_today = next(
+                (
+                    snapshot.equity
+                    for snapshot in risk_equity_snapshots
+                    if _safe_datetime(snapshot.observed_at).astimezone(NEW_YORK).date()
+                    == local_date
+                ),
+                fallback_equity,
+            )
+            latest_today = max(BASELINE_EQUITY, first_today)
             open_statuses = (
                 "accepted",
                 "accepted_for_bidding",

@@ -67,6 +67,11 @@ def market_session_phase(at: datetime) -> MarketSessionPhase:
     return "overnight"
 
 
+def is_regular_market_performance_observation(at: datetime) -> bool:
+    """Return whether an observation can establish competition risk baselines."""
+    return is_official_performance_observation(at) and market_session_phase(at) == "market_hours"
+
+
 def competition_entry_window_open(at: datetime) -> bool:
     """Return whether a new competition entry may be considered at this wall-clock time."""
     if at.tzinfo is None or at.utcoffset() is None:

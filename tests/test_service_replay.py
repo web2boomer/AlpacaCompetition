@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -42,15 +42,17 @@ def production_settings(settings) -> Settings:
     )
 
 
-def test_portfolio_peak_ignores_unreconciled_assignment_mark(repository, replay_adapter) -> None:
-    now = replay_adapter.observed_at
-    clean_run_id = str(uuid4())
-    incident_run_id = str(uuid4())
+def test_portfolio_peak_uses_only_regular_market_competition_marks(repository) -> None:
+    now = datetime(2026, 9, 2, 16, 5, tzinfo=UTC)
+    observations = (
+        (datetime(2026, 9, 2, 7, 35, tzinfo=UTC), Decimal("228875.69"), Decimal("100007.69")),
+        (datetime(2026, 9, 2, 7, 50, tzinfo=UTC), Decimal("99820.00"), Decimal("-28992.96")),
+        (datetime(2026, 9, 2, 14, 0, tzinfo=UTC), Decimal("100202.04"), Decimal("100202.04")),
+        (now, Decimal("100053.14"), Decimal("100053.14")),
+    )
     with repository.database.session() as session:
-        for run_id, reconciliation_clean, equity in (
-            (clean_run_id, True, Decimal("100053.14")),
-            (incident_run_id, False, Decimal("228875.69")),
-        ):
+        for observed_at, equity, cash in observations:
+            run_id = str(uuid4())
             session.add(
                 AgentRunORM(
                     id=run_id,
@@ -58,11 +60,11 @@ def test_portfolio_peak_ignores_unreconciled_assignment_mark(repository, replay_
                     correlation_id=str(uuid4()),
                     mode="replay",
                     status="completed",
-                    started_at=now,
-                    completed_at=now,
+                    started_at=observed_at,
+                    completed_at=observed_at,
                     passport_json={
                         "operational_state": {
-                            "reconciliation_clean": reconciliation_clean,
+                            "reconciliation_clean": True,
                         }
                     },
                 )
@@ -70,9 +72,9 @@ def test_portfolio_peak_ignores_unreconciled_assignment_mark(repository, replay_
             session.add(
                 EquitySnapshotORM(
                     agent_run_id=run_id,
-                    observed_at=now,
+                    observed_at=observed_at,
                     equity=equity,
-                    cash=equity,
+                    cash=cash,
                     buying_power=equity,
                     portfolio_value=equity,
                     realized_pl=Decimal("0"),
@@ -85,7 +87,13 @@ def test_portfolio_peak_ignores_unreconciled_assignment_mark(repository, replay_
 
     summary = repository.portfolio_risk_summary(Decimal("100053.14"), now=now)
 
-    assert summary["peak_equity"] == Decimal("100053.14")
+    assert summary["peak_equity"] == Decimal("100202.04")
+    assert summary["start_of_day_equity"] == Decimal("100202.04")
+    assert summary["peak_equity"] - Decimal("100053.14") == Decimal("148.90")
+    with repository.database.session() as session:
+        raw_equities = list(session.scalars(select(EquitySnapshotORM.equity)))
+    assert Decimal("228875.69") in raw_equities
+    assert len(raw_equities) == 4
 
 
 async def seed_managed_position(settings, repository, replay_adapter, *, quantity: str = "1"):

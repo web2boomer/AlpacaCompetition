@@ -397,6 +397,38 @@ async def test_loss_stops_enforce_exact_authorized_boundaries(
 
 
 @pytest.mark.asyncio
+async def test_clean_competition_peak_allows_directional_but_real_drawdown_still_blocks(
+    replay_candidate,
+) -> None:
+    candidate = directional_candidate(replay_candidate)
+    selected = decision(candidate, confidence=0.90)
+
+    clean = evaluate_risk(
+        selected,
+        candidate,
+        context(
+            equity=Decimal("100053.14"),
+            start_of_day_equity=Decimal("100202.04"),
+            peak_equity=Decimal("100202.04"),
+        ),
+    )
+    genuine_drawdown = evaluate_risk(
+        selected,
+        candidate,
+        context(
+            equity=Decimal("100000"),
+            start_of_day_equity=Decimal("100000"),
+            peak_equity=Decimal("110000"),
+        ),
+    )
+
+    assert clean.approved
+    assert RiskReason.DRAWDOWN not in clean.reason_codes
+    assert not genuine_drawdown.approved
+    assert RiskReason.DRAWDOWN in genuine_drawdown.reason_codes
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("updates", "reason"),
     [
