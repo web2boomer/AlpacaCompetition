@@ -13,6 +13,7 @@ from money_machine.settings import Settings
 
 EXPECTED_FINGERPRINT = "2e10efeeb330"
 TERMINAL_STATUSES = {"filled", "canceled", "expired", "rejected"}
+MAX_ADVERSE_LIMIT_OFFSET = Decimal("0.25")
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,7 +39,7 @@ RECOVERY_POSITIONS = {
         assigned_leg="IWM260901P00291000",
     ),
     "QQQ": AssignmentSpec(
-        quantity=Decimal("100"),
+        quantity=Decimal("27"),
         parent_client_order_id="mm-comp-81df6bbd24663e7b199558e9",
         parent_broker_order_id="d2f9ef1f-b8d3-4ab6-a0a4-05ea86e98b33",
         assigned_leg="QQQ260901P00708000",
@@ -109,7 +110,9 @@ async def _recover(
         symbol: _bounded_sell_limit(_fresh_bid(snapshots, symbol), symbol)
         for symbol in RECOVERY_POSITIONS
     }
-    run_id, created = repository.begin_run("assignment-recovery:2026-09-02", RunMode.LIVE, now)
+    run_id, created = repository.begin_run(
+        "assignment-recovery-residual-1:2026-09-02", RunMode.LIVE, now
+    )
     if not created:
         raise RuntimeError("assignment recovery was already attempted")
 
@@ -117,7 +120,7 @@ async def _recover(
     for symbol in ("QQQ", "IWM"):
         expected = RECOVERY_POSITIONS[symbol]
         quantity = int(expected.quantity)
-        client_order_id = f"mm-comp-ar-20260902-{symbol.lower()}"
+        client_order_id = f"mm-comp-ar2-20260902-{symbol.lower()}"
         repository.persist_assignment_recovery_intent(
             run_id,
             symbol=symbol,
@@ -152,6 +155,11 @@ async def _recover(
             observed_at=datetime.now(UTC),
             broker_payload=_redacted_terminal(terminal),
         )
+        live_orders, live_positions = await asyncio.gather(
+            adapter.orders(status="open"), adapter.positions()
+        )
+        if live_orders:
+            raise RuntimeError(f"{symbol} terminalized with a broker working order")
         receipts.append(
             {
                 "symbol": symbol,
@@ -164,7 +172,11 @@ async def _recover(
             }
         )
         if status != "filled" or filled_qty != expected.quantity:
-            raise RuntimeError(f"{symbol} assignment recovery did not fill exactly")
+            residual = _position_quantities(live_positions)
+            raise RuntimeError(
+                f"{symbol} assignment recovery did not fill exactly; residual={residual}"
+            )
+        _verify_residual_positions(symbol, live_positions)
 
     final_account, final_orders, final_positions = await asyncio.gather(
         adapter.account(), adapter.orders(status="open"), adapter.positions()
@@ -200,6 +212,13 @@ def _verify_configuration(settings: Settings) -> None:
 
 
 def _verify_positions(positions: list[dict[str, Any]]) -> None:
+    actual = _position_quantities(positions)
+    expected = {symbol: values.quantity for symbol, values in RECOVERY_POSITIONS.items()}
+    if actual != expected:
+        raise RuntimeError("broker positions differ from the exact authorized assignments")
+
+
+def _position_quantities(positions: list[dict[str, Any]]) -> dict[str, Decimal]:
     actual: dict[str, Decimal] = {}
     for position in positions:
         symbol = str(position.get("symbol") or "")
@@ -209,9 +228,18 @@ def _verify_positions(positions: list[dict[str, Any]]) -> None:
         if not symbol or side != "long" or asset_class not in {"us_equity", "stock"}:
             raise RuntimeError("broker position is not an expected long stock assignment")
         actual[symbol] = quantity
-    expected = {symbol: values.quantity for symbol, values in RECOVERY_POSITIONS.items()}
-    if actual != expected:
-        raise RuntimeError("broker positions differ from the exact authorized assignments")
+    return actual
+
+
+def _verify_residual_positions(filled_symbol: str, positions: list[dict[str, Any]]) -> None:
+    if filled_symbol == "QQQ":
+        expected = {"IWM": RECOVERY_POSITIONS["IWM"].quantity}
+    elif filled_symbol == "IWM":
+        expected = {}
+    else:
+        raise RuntimeError("unauthorized assignment recovery symbol")
+    if _position_quantities(positions) != expected:
+        raise RuntimeError(f"unexpected broker residual after {filled_symbol} recovery")
 
 
 def _fresh_bid(payload: dict[str, Any], symbol: str) -> Decimal:
@@ -237,7 +265,7 @@ def _fresh_bid(payload: dict[str, Any], symbol: str) -> Decimal:
 def _bounded_sell_limit(bid: Decimal, symbol: str) -> Decimal:
     if symbol not in RECOVERY_POSITIONS:
         raise RuntimeError("unauthorized assignment recovery symbol")
-    return (bid - Decimal("0.10")).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+    return (bid - MAX_ADVERSE_LIMIT_OFFSET).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
 
 
 async def _terminal_order(adapter: RecoveryAdapter, broker_order_id: str) -> dict[str, Any]:

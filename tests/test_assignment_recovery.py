@@ -45,7 +45,7 @@ class FakeAdapter:
         self.open_orders: list[dict[str, object]] = []
         self.initial_positions = [
             {"symbol": "IWM", "qty": "200", "side": "long", "asset_class": "us_equity"},
-            {"symbol": "QQQ", "qty": "100", "side": "long", "asset_class": "us_equity"},
+            {"symbol": "QQQ", "qty": "27", "side": "long", "asset_class": "us_equity"},
         ]
         self.placed: list[dict[str, object]] = []
 
@@ -67,7 +67,11 @@ class FakeAdapter:
         return self.open_orders
 
     async def positions(self):
-        return self.initial_positions if len(self.placed) < 2 else []
+        if not self.placed:
+            return self.initial_positions
+        if len(self.placed) == 1:
+            return [self.initial_positions[0]]
+        return []
 
     async def stock_snapshots(self, symbols, *, feed=None):
         assert symbols == ["IWM", "QQQ"]
@@ -92,7 +96,7 @@ class FakeAdapter:
 
     async def order_by_id(self, broker_order_id):
         symbol = broker_order_id.removeprefix("broker-").upper()
-        quantity = "100" if symbol == "QQQ" else "200"
+        quantity = "27" if symbol == "QQQ" else "200"
         return {
             "id": broker_order_id,
             "status": "filled",
@@ -115,10 +119,10 @@ async def test_guarded_assignment_recovery_fills_exact_inventory_and_audits() ->
     assert receipt["working_orders"] == 0
     assert receipt["incident_cleared_by_command"] is False
     assert [order["symbol"] for order in adapter.placed] == ["QQQ", "IWM"]
-    assert adapter.placed[0]["quantity"] == 100
-    assert adapter.placed[0]["limit_price"] == Decimal("707.00")
+    assert adapter.placed[0]["quantity"] == 27
+    assert adapter.placed[0]["limit_price"] == Decimal("706.85")
     assert adapter.placed[1]["quantity"] == 200
-    assert adapter.placed[1]["limit_price"] == Decimal("290.40")
+    assert adapter.placed[1]["limit_price"] == Decimal("290.25")
     assert len(repository.intents) == 2
     assert len(repository.updates) == 4
     assert len(repository.completed) == 1
@@ -166,7 +170,7 @@ async def test_guarded_assignment_recovery_stops_after_partial_fill() -> None:
     adapter = FakeAdapter()
 
     async def partial_order(_broker_order_id):
-        return {"status": "canceled", "filled_qty": "50", "filled_avg_price": "707.00"}
+        return {"status": "canceled", "filled_qty": "10", "filled_avg_price": "707.00"}
 
     adapter.order_by_id = partial_order  # type: ignore[method-assign]
 

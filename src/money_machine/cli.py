@@ -67,7 +67,7 @@ def main() -> None:
     kill.add_argument("--confirm-production-clear", action="store_true")
     recovery = subparsers.add_parser(
         "assignment-recovery",
-        help="guarded one-off flatten of the exact Sep 2 stock assignments",
+        help="guarded one-off flatten of the exact Sep 2 residual assignments",
     )
     recovery.add_argument("--confirm-assignment-recovery", action="store_true")
     args = parser.parse_args()
