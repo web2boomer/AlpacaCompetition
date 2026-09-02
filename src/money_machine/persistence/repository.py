@@ -1322,6 +1322,17 @@ class AuditRepository:
             run.passport_json = passport
             run.incident = incident
 
+    def complete_maintenance_run(self, run_id: str, *, completed_at: datetime) -> None:
+        """Complete an audited maintenance run without publishing a Decision Passport."""
+        with self.database.session() as session:
+            run = session.get(AgentRunORM, run_id)
+            if run is None:
+                raise KeyError(run_id)
+            run.completed_at = completed_at
+            run.status = "completed"
+            run.passport_json = None
+            run.incident = None
+
     def latest_passport(self) -> dict[str, Any] | None:
         with self.database.session() as session:
             value = session.scalar(

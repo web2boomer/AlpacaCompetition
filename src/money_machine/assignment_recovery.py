@@ -200,7 +200,7 @@ async def _recover(
         "incident_cleared_by_command": False,
         "observed_at": datetime.now(UTC).isoformat(),
     }
-    repository.complete_run(run_id, completed_at=datetime.now(UTC), passport=receipt)
+    repository.complete_maintenance_run(run_id, completed_at=datetime.now(UTC))
     return receipt
 
 

@@ -5,6 +5,7 @@ import pytest
 from pydantic import SecretStr
 
 from money_machine.assignment_recovery import guarded_assignment_recovery
+from money_machine.domain.enums import RunMode
 from money_machine.domain.schemas import AccountSnapshot, BrokerOrderResult
 from money_machine.settings import Settings
 
@@ -35,7 +36,7 @@ class FakeRepository:
     def update_assignment_recovery_order(self, client_order_id, **kwargs):
         self.updates.append({"client_order_id": client_order_id, **kwargs})
 
-    def complete_run(self, _run_id, **kwargs):
+    def complete_maintenance_run(self, _run_id, **kwargs):
         self.completed.append(kwargs)
 
 
@@ -193,3 +194,13 @@ async def test_guarded_assignment_recovery_requires_explicit_production_role(set
         await guarded_assignment_recovery(  # type: ignore[arg-type]
             settings, FakeRepository(), adapter=FakeAdapter()
         )
+
+
+def test_maintenance_run_does_not_masquerade_as_decision_passport(repository) -> None:
+    now = datetime.now(UTC)
+    run_id, created = repository.begin_run("maintenance:test-receipt", RunMode.LIVE, now)
+    assert created
+
+    repository.complete_maintenance_run(run_id, completed_at=now)
+
+    assert repository.passport_for_run(run_id) is None
