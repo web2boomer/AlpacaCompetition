@@ -3,7 +3,7 @@ from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
 from money_machine.domain.clock import FORCED_FLATTEN_STARTS_AT, NEW_YORK
-from money_machine.domain.enums import PositionIntent, Side
+from money_machine.domain.enums import Action, PositionIntent, Side
 from money_machine.domain.schemas import (
     BrokerOrderRequest,
     OptionLeg,
@@ -22,7 +22,11 @@ URGENT_MAX_TOTAL_CONCESSION = Decimal("0.30")
 CREDIT_TAKE_PROFIT_FRACTION = Decimal("0.50")
 CREDIT_STOP_LOSS_MULTIPLE = Decimal("2.00")
 DEBIT_TAKE_PROFIT_MULTIPLE = Decimal("1.50")
+COMPETITION_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE = Decimal("1.08")
 DEBIT_STOP_VALUE_FRACTION = Decimal("0.65")
+COMPETITION_DIRECTIONAL_DEBIT_STRATEGIES = frozenset(
+    {Action.CALL_DEBIT_SPREAD, Action.PUT_DEBIT_SPREAD}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -307,7 +311,12 @@ def structure_exit_signal(
         return StructureExitSignal(False, "credit_exit_not_reached", close_debit)
 
     close_credit = max(Decimal("0"), -cash_required)
-    if close_credit >= opening_price * DEBIT_TAKE_PROFIT_MULTIPLE:
+    take_profit_multiple = (
+        COMPETITION_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE
+        if managed.structure.strategy in COMPETITION_DIRECTIONAL_DEBIT_STRATEGIES
+        else DEBIT_TAKE_PROFIT_MULTIPLE
+    )
+    if close_credit >= opening_price * take_profit_multiple:
         return StructureExitSignal(True, "debit_take_profit", close_credit, "soft")
     if close_credit <= opening_price * DEBIT_STOP_VALUE_FRACTION:
         return StructureExitSignal(True, "debit_stop_loss", close_credit, "urgent")

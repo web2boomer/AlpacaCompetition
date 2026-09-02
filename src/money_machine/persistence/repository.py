@@ -9,6 +9,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from money_machine.domain.clock import (
     BASELINE_EQUITY,
@@ -19,7 +20,7 @@ from money_machine.domain.clock import (
     is_regular_market_performance_observation,
     scoring_window_state,
 )
-from money_machine.domain.enums import ExecutionState, RunMode
+from money_machine.domain.enums import ExecutionState, RunMode, Side
 from money_machine.domain.schemas import (
     AccountSnapshot,
     AuctionResult,
@@ -673,6 +674,13 @@ class AuditRepository:
                     continue
                 if not order.broker_order_id:
                     continue
+                legs = tuple(OptionLeg.model_validate(leg) for leg in structure.legs_json)
+                opening_fill_price = _filled_structure_price(
+                    session,
+                    broker_order_id=order.broker_order_id,
+                    legs=legs,
+                    expected_quantity=order.quantity,
+                )
                 managed.append(
                     ManagedStructure(
                         agent_run_id=order.agent_run_id,
@@ -687,10 +695,11 @@ class AuditRepository:
                             strategy=structure.strategy,
                             underlying=structure.underlying,
                             expiration=structure.expiration,
-                            legs=tuple(
-                                OptionLeg.model_validate(leg) for leg in structure.legs_json
-                            ),
-                            net_price=structure.net_price,
+                            legs=legs,
+                            # A fully reconstructed broker fill is authoritative. The accepted
+                            # order limit is the conservative fallback after bounded repricing;
+                            # the pre-entry candidate midpoint must not set lifecycle exits.
+                            net_price=opening_fill_price or order.limit_price,
                             maximum_loss=structure.maximum_loss,
                             maximum_profit=structure.maximum_profit,
                             is_credit=structure.is_credit,
@@ -1585,6 +1594,31 @@ def _daily_loss_control(row: DailyLossControlORM) -> DailyLossControl:
         quote_quality_passed=row.quote_quality_passed,
         reason=row.reason,
     )
+
+
+def _filled_structure_price(
+    session: Session,
+    *,
+    broker_order_id: str,
+    legs: tuple[OptionLeg, ...],
+    expected_quantity: int,
+) -> Decimal | None:
+    """Return the broker-confirmed net opening price for a completely filled MLEG order."""
+    fills = tuple(
+        session.scalars(select(FillORM).where(FillORM.broker_order_id == broker_order_id))
+    )
+    if not fills or expected_quantity < 1:
+        return None
+    total_cash = Decimal("0")
+    for leg in legs:
+        leg_fills = tuple(fill for fill in fills if fill.symbol == leg.symbol)
+        filled_quantity = sum((abs(fill.quantity) for fill in leg_fills), Decimal("0"))
+        expected_leg_quantity = Decimal(expected_quantity * leg.ratio_qty)
+        if filled_quantity != expected_leg_quantity:
+            return None
+        leg_cash = sum((fill.price * abs(fill.quantity) for fill in leg_fills), Decimal("0"))
+        total_cash += leg_cash if leg.side is Side.BUY else -leg_cash
+    return abs(total_cash / Decimal(expected_quantity))
 
 
 def _remaining_order_quantity(payload: dict[str, Any], fallback: int) -> Decimal:

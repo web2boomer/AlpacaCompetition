@@ -255,7 +255,7 @@ async def test_openai_double_abstention_cannot_veto_eligible_directional(
     )
     risk = evaluate_risk(envelope.decision, directional, context)
     tier = next(check for check in risk.checks if check.name == "effective_per_structure_percent")
-    assert tier.actual == "0.015"
+    assert tier.actual == "0.03"
 
     blocked = evaluate_risk(
         envelope.decision,

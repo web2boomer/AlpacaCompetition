@@ -345,8 +345,8 @@ The agent may purchase a small put debit spread when portfolio exposure breaches
 
 Competition limits:
 
-- Maximum loss per index or directional structure: 1.50% of current equity.
-- High-conviction liquid index tier: up to 4.00% of current equity only when validated
+- Maximum loss per index or directional structure: 3.00% of current equity.
+- High-conviction liquid index tier: up to 6.00% of current equity only when validated
   model confidence is at least 0.80 and every existing data, liquidity, reconciliation,
   event, directional, and portfolio gate passes. Premium-selling index condors additionally
   require richness of at least 1.50 and reward/risk of at least 0.25. Directional debit
@@ -355,24 +355,27 @@ Competition limits:
   richness never qualifies a debit spread for larger sizing because it can reflect expensive
   option premium. Earnings candidates are never eligible for this tier.
 - Maximum loss per earnings structure: 0.35% of current equity.
-- Maximum combined SPY/QQQ/IWM cluster loss: 8.00% of current equity.
-- Maximum total concurrent defined loss: 10.00% of current equity.
-- Daily realized plus unrealized loss stop: 4.00% of start-of-day equity.
+- Maximum combined SPY/QQQ/IWM cluster loss: 12.00% of current equity.
+- Maximum total concurrent defined loss: 15.00% of current equity.
+- Daily realized plus unrealized loss stop: 6.00% of start-of-day equity.
 - A raw daily-loss breach freezes new entries immediately. Liquidation of a clean, fully
   reconciled defined-risk book requires a second broker equity observation plus complete,
   fresh, internally consistent executable leg quotes. A loss materially beyond the persisted
   defined-loss envelope is quarantined as a mark-quality incident rather than treated as a
   credible liquidation signal. A validated breach latches the entry halt through the UTC
   session; reconciliation and other structural safety incidents retain immediate close authority.
-- Competition peak-to-trough drawdown stop: 8.00%.
+- Competition peak-to-trough drawdown stop: 12.00%.
 - Maximum one managed or pending alpha structure per underlying. Raw parent-order count is not
-  an independent veto; authoritative 8.00% correlated-cluster and 10.00% total defined-loss caps
+  an independent veto; authoritative 12.00% correlated-cluster and 15.00% total defined-loss caps
   remain final portfolio limits.
 - Maximum one pending entry per underlying.
 - No pyramiding, adding to, or resizing an existing managed structure.
 - No naked legs.
 - No market orders for multi-leg entries or exits under normal operation.
 - No quantity increase after an adverse move.
+- Competition directional debit spreads take profit when fresh executable closing quotes reach
+  1.08 times opening debit. Other debit strategies retain the 1.50 multiple, credit strategies
+  retain their separate exit policy, and the directional 0.65 premium-value stop is unchanged.
 - No new entries during close-only state.
 
 Risk decisions return machine-readable reason codes. A rejected intent remains visible on the dashboard.

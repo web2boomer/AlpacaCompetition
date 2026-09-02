@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -150,6 +150,50 @@ async def test_directional_confirmation_fails_closed(
 
 
 @pytest.mark.asyncio
+async def test_thursday_0945_boundary_still_requires_two_cycle_confirmation(
+    replay_adapter,
+) -> None:
+    snapshots, report = await _market(replay_adapter)
+    now = datetime(2026, 9, 3, 13, 45, tzinfo=UTC)
+    snapshots = [snapshot.model_copy(update={"observed_at": now}) for snapshot in snapshots]
+    current = next(snapshot for snapshot in snapshots if snapshot.symbol == "IWM")
+    confirmed = PriorRepository(
+        PriorMarketObservation(
+            cycle_at=now - timedelta(minutes=5),
+            observed_at=now - timedelta(minutes=5),
+            snapshot=current.model_copy(update={"observed_at": now - timedelta(minutes=5)}),
+        )
+    )
+
+    allowed, evidence = _directional_policy_exclusions(
+        report.candidates,
+        snapshots=snapshots,
+        repository=confirmed,
+        run_id="thursday-boundary",
+        mode=RunMode.LIVE,
+        now=now,
+    )
+    missing, _ = _directional_policy_exclusions(
+        report.candidates,
+        snapshots=snapshots,
+        repository=PriorRepository(None),
+        run_id="thursday-boundary-missing",
+        mode=RunMode.LIVE,
+        now=now,
+    )
+    iwm = next(
+        item
+        for item in report.candidates
+        if item.structure.underlying == "IWM"
+        and item.action in {Action.CALL_DEBIT_SPREAD, Action.PUT_DEBIT_SPREAD}
+    )
+
+    assert iwm.candidate_id not in allowed
+    assert evidence[iwm.candidate_id]["reason"] == "two_cycle_direction_confirmed"
+    assert missing[iwm.candidate_id] == ("directional_confirmation_missing_history",)
+
+
+@pytest.mark.asyncio
 async def test_production_passport_preserves_condors_and_records_policy_exclusions(
     settings, repository, replay_adapter, monkeypatch
 ) -> None:
@@ -207,10 +251,10 @@ async def test_production_passport_preserves_condors_and_records_policy_exclusio
 
 
 def test_recovery_does_not_change_live_directional_risk_policy() -> None:
-    assert Decimal("0.015") == INDEX_PER_STRUCTURE_PCT
-    assert Decimal("0.04") == HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT
-    assert Decimal("0.08") == INDEX_CLUSTER_PCT
-    assert Decimal("0.10") == TOTAL_DEFINED_LOSS_PCT
+    assert Decimal("0.03") == INDEX_PER_STRUCTURE_PCT
+    assert Decimal("0.06") == HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT
+    assert Decimal("0.12") == INDEX_CLUSTER_PCT
+    assert Decimal("0.15") == TOTAL_DEFINED_LOSS_PCT
     assert Decimal("0.80") == HIGH_CONVICTION_MIN_CONFIDENCE
     assert Decimal("0.005") == HIGH_CONVICTION_MIN_DIRECTIONAL_TREND_STRENGTH
     assert Decimal("2.00") == HIGH_CONVICTION_MIN_DIRECTIONAL_REWARD_RISK_RATIO

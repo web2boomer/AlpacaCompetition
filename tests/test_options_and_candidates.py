@@ -198,6 +198,18 @@ def test_directional_event_window_restores_morning_runway_and_enforces_boundary(
     assert "cooldown" in cooldown.reason
 
 
+def test_thursday_release_cooldown_ends_at_0945_et() -> None:
+    just_before = datetime(2026, 9, 3, 13, 44, 59, tzinfo=UTC)
+    boundary = datetime(2026, 9, 3, 13, 45, tzinfo=UTC)
+
+    assert scheduled_macro_event_risk(just_before, intended_holding_minutes=60)
+    assert not directional_event_window(just_before).accepted
+    assert not scheduled_macro_event_risk(boundary, intended_holding_minutes=60)
+    window = directional_event_window(boundary)
+    assert window.accepted
+    assert window.maximum_holding_minutes == 60
+
+
 @pytest.mark.asyncio
 async def test_directional_candidate_uses_event_safe_window_not_six_hour_condor_horizon(
     replay_adapter,
@@ -313,10 +325,10 @@ async def test_iwm_directional_candidate_sizes_with_existing_index_caps(replay_a
     result = evaluate_risk(model_decision(candidate), candidate, risk_context())
 
     assert result.approved
-    assert result.quantity == int(Decimal("1500") // candidate.structure.maximum_loss)
+    assert result.quantity == int(Decimal("3000") // candidate.structure.maximum_loss)
     assert result.awarded_risk == candidate.structure.maximum_loss * result.quantity
-    assert result.awarded_risk <= Decimal("1500")
-    assert risk_check(result, "effective_per_structure_percent").actual == "0.015"
+    assert result.awarded_risk <= Decimal("3000")
+    assert risk_check(result, "effective_per_structure_percent").actual == "0.03"
 
 
 @pytest.mark.asyncio
@@ -348,9 +360,9 @@ async def test_iwm_directional_distinct_underlying_remains_eligible(replay_adapt
     assert result.approved
     assert candidate.structure.maximum_loss == Decimal("120.00")
     assert candidate.structure.maximum_profit == Decimal("380.00")
-    assert result.quantity == 33
-    assert result.awarded_risk == Decimal("3960.00")
-    assert risk_check(result, "effective_per_structure_percent").actual == "0.04"
+    assert result.quantity == 50
+    assert result.awarded_risk == Decimal("6000.00")
+    assert risk_check(result, "effective_per_structure_percent").actual == "0.06"
     assert (
         "candidate_underlying=IWM"
         in risk_check(result, "portfolio_underlying_diversification").actual

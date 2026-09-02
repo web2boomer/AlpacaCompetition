@@ -27,7 +27,7 @@ COMPETITION_MACRO_EVENTS = (
     MacroEvent(
         "Productivity and international trade",
         datetime(2026, 9, 3, 12, 30, tzinfo=UTC),
-        90,
+        75,
     ),
     MacroEvent("Employment Situation", datetime(2026, 9, 4, 12, 30, tzinfo=UTC), 90),
 )
@@ -45,7 +45,7 @@ def scheduled_macro_event_risk(at: datetime, *, intended_holding_minutes: int = 
     intended_exit = now + timedelta(minutes=intended_holding_minutes)
     return any(
         now <= event.releases_at <= intended_exit
-        or event.releases_at < now <= event.releases_at + timedelta(minutes=event.cooldown_minutes)
+        or event.releases_at < now < event.releases_at + timedelta(minutes=event.cooldown_minutes)
         for event in COMPETITION_MACRO_EVENTS
     )
 
@@ -57,7 +57,7 @@ def directional_event_window(at: datetime) -> DirectionalEventWindow:
     now = at.astimezone(UTC)
     for event in COMPETITION_MACRO_EVENTS:
         cooldown_end = event.releases_at + timedelta(minutes=event.cooldown_minutes)
-        if event.releases_at <= now <= cooldown_end:
+        if event.releases_at <= now < cooldown_end:
             return DirectionalEventWindow(
                 accepted=False,
                 maximum_holding_minutes=0,

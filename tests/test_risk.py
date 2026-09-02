@@ -147,9 +147,9 @@ def check(result, name: str):
 async def test_quantity_rounds_down_to_per_structure_cap(replay_candidate) -> None:
     result = evaluate_risk(decision(replay_candidate), replay_candidate, context())
     assert result.approved
-    assert result.quantity == 3
-    assert result.awarded_risk == replay_candidate.structure.maximum_loss * 3
-    assert result.awarded_risk <= Decimal("1500")
+    assert result.quantity == 7
+    assert result.awarded_risk == replay_candidate.structure.maximum_loss * 7
+    assert result.awarded_risk <= Decimal("3000")
 
 
 def test_daily_loss_provisional_or_latched_state_blocks_entries(replay_candidate) -> None:
@@ -167,9 +167,9 @@ def test_daily_loss_provisional_or_latched_state_blocks_entries(replay_candidate
 @pytest.mark.parametrize(
     ("confidence", "richness", "tier_applied", "expected_quantity"),
     [
-        (0.79, Decimal("1.50"), False, 3),
-        (0.80, Decimal("1.49"), False, 3),
-        (0.80, Decimal("1.50"), True, 10),
+        (0.79, Decimal("1.50"), False, 7),
+        (0.80, Decimal("1.49"), False, 7),
+        (0.80, Decimal("1.50"), True, 15),
     ],
 )
 async def test_high_conviction_index_tier_boundaries(
@@ -218,7 +218,7 @@ async def test_condor_high_conviction_payoff_boundary(
     result = evaluate_risk(decision(candidate, confidence=0.80), candidate, context())
 
     assert result.approved
-    assert result.quantity == (10 if tier_applied else 3)
+    assert result.quantity == (15 if tier_applied else 7)
     evidence = check(result, "high_conviction_index_tier").actual
     assert f"applied={str(tier_applied).lower()}" in evidence
     expected_reason = "qualified" if tier_applied else "condor_reward_risk_below_threshold"
@@ -246,8 +246,8 @@ async def test_current_102_credit_398_loss_condor_qualifies(replay_candidate) ->
     result = evaluate_risk(decision(candidate, confidence=0.80), candidate, context())
 
     assert result.approved
-    assert result.quantity == 10
-    assert result.awarded_risk == Decimal("3980.00")
+    assert result.quantity == 15
+    assert result.awarded_risk == Decimal("5970.00")
     evidence = check(result, "high_conviction_index_tier").actual
     assert "applied=true" in evidence
     assert "reward_risk=0.2562814070351758793969849246" in evidence
@@ -341,8 +341,8 @@ async def test_earnings_risk_stays_at_point_three_five_percent(replay_candidate)
 
 
 def test_competition_risk_policy_constants_are_fixed() -> None:
-    assert Decimal("0.015") == INDEX_PER_STRUCTURE_PCT
-    assert Decimal("0.04") == HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT
+    assert Decimal("0.03") == INDEX_PER_STRUCTURE_PCT
+    assert Decimal("0.06") == HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT
     assert Decimal("0.0035") == EARNINGS_PER_STRUCTURE_PCT
     assert Decimal("0.80") == HIGH_CONVICTION_MIN_CONFIDENCE
     assert Decimal("1.50") == HIGH_CONVICTION_MIN_RICHNESS_RATIO
@@ -350,28 +350,28 @@ def test_competition_risk_policy_constants_are_fixed() -> None:
     assert Decimal("0.005") == HIGH_CONVICTION_MIN_DIRECTIONAL_TREND_STRENGTH
     assert Decimal("2.00") == HIGH_CONVICTION_MIN_DIRECTIONAL_REWARD_RISK_RATIO
     assert Decimal("1") / Decimal("3") == HIGH_CONVICTION_MAX_DEBIT_TO_WIDTH_RATIO
-    assert Decimal("0.08") == INDEX_CLUSTER_PCT
-    assert Decimal("0.10") == TOTAL_DEFINED_LOSS_PCT
-    assert Decimal("0.04") == DAILY_LOSS_PCT
-    assert Decimal("0.08") == COMPETITION_DRAWDOWN_PCT
+    assert Decimal("0.12") == INDEX_CLUSTER_PCT
+    assert Decimal("0.15") == TOTAL_DEFINED_LOSS_PCT
+    assert Decimal("0.06") == DAILY_LOSS_PCT
+    assert Decimal("0.12") == COMPETITION_DRAWDOWN_PCT
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("equity", "start_of_day_equity", "peak_equity", "approved", "reason"),
     [
-        (Decimal("96000.01"), Decimal("100000"), Decimal("100000"), True, None),
+        (Decimal("94000.01"), Decimal("100000"), Decimal("100000"), True, None),
         (
-            Decimal("96000.00"),
+            Decimal("94000.00"),
             Decimal("100000"),
             Decimal("100000"),
             False,
             RiskReason.DAILY_LOSS,
         ),
-        (Decimal("92000.01"), Decimal("92000.01"), Decimal("100000"), True, None),
+        (Decimal("88000.01"), Decimal("88000.01"), Decimal("100000"), True, None),
         (
-            Decimal("92000.00"),
-            Decimal("92000.00"),
+            Decimal("88000.00"),
+            Decimal("88000.00"),
             Decimal("100000"),
             False,
             RiskReason.DRAWDOWN,
@@ -418,7 +418,7 @@ async def test_clean_competition_peak_allows_directional_but_real_drawdown_still
         context(
             equity=Decimal("100000"),
             start_of_day_equity=Decimal("100000"),
-            peak_equity=Decimal("110000"),
+            peak_equity=Decimal("115000"),
         ),
     )
 
@@ -435,9 +435,9 @@ async def test_clean_competition_peak_allows_directional_but_real_drawdown_still
         ({"execution_state": ExecutionState.CLOSE_ONLY}, RiskReason.NOT_FULL_EXECUTION),
         ({"kill_switch_active": True}, RiskReason.KILL_SWITCH),
         ({"reconciliation_clean": False}, RiskReason.RECONCILIATION),
-        ({"equity": Decimal("95999")}, RiskReason.DAILY_LOSS),
+        ({"equity": Decimal("93999")}, RiskReason.DAILY_LOSS),
         (
-            {"equity": Decimal("91999"), "start_of_day_equity": Decimal("91999")},
+            {"equity": Decimal("87999"), "start_of_day_equity": Decimal("87999")},
             RiskReason.DRAWDOWN,
         ),
     ],
@@ -494,15 +494,15 @@ async def test_raw_structure_count_does_not_block_distinct_underlying_with_headr
     )
 
     assert result.approved
-    assert result.quantity == 3
-    assert result.awarded_risk == Decimal("1194")
+    assert result.quantity == 7
+    assert result.awarded_risk == Decimal("2786")
     diversification = check(result, "portfolio_underlying_diversification")
     assert "open_underlyings=IWM,QQQ" in diversification.actual
     assert "candidate_underlying=SPY" in diversification.actual
 
 
 @pytest.mark.asyncio
-async def test_live_style_spy_debit_spread_sizes_to_twelve_with_distinct_underlying(
+async def test_live_style_spy_debit_spread_sizes_to_twenty_five_with_distinct_underlying(
     replay_candidate,
 ) -> None:
     candidate = candidate_for_underlying(
@@ -527,10 +527,10 @@ async def test_live_style_spy_debit_spread_sizes_to_twelve_with_distinct_underly
     )
 
     assert result.approved
-    assert result.quantity == 12
-    assert result.awarded_risk == Decimal("1440.00")
-    assert check(result, "effective_per_structure_percent").actual == "0.015"
-    assert check(result, "effective_per_structure_budget").actual == "1500.000"
+    assert result.quantity == 25
+    assert result.awarded_risk == Decimal("3000.00")
+    assert check(result, "effective_per_structure_percent").actual == "0.03"
+    assert check(result, "effective_per_structure_budget").actual == "3000.00"
     assert "applied=false" in check(result, "high_conviction_index_tier").actual
 
 
@@ -539,7 +539,7 @@ async def test_correlated_index_cap_rounds_quantity_to_zero(replay_candidate) ->
     result = evaluate_risk(
         decision(replay_candidate),
         replay_candidate,
-        context(index_cluster_defined_loss=Decimal("7800")),
+        context(index_cluster_defined_loss=Decimal("11900")),
     )
     assert not result.approved
     assert RiskReason.ZERO_QUANTITY in result.reason_codes
@@ -550,7 +550,7 @@ async def test_total_defined_loss_cap_rejects(replay_candidate) -> None:
     result = evaluate_risk(
         decision(replay_candidate),
         replay_candidate,
-        context(total_open_defined_loss=Decimal("9800")),
+        context(total_open_defined_loss=Decimal("14900")),
     )
     assert not result.approved
     assert RiskReason.ZERO_QUANTITY in result.reason_codes
@@ -564,17 +564,17 @@ async def test_quantity_floors_to_smallest_remaining_budget(replay_candidate) ->
         decision(candidate, confidence=0.80),
         candidate,
         context(
-            index_cluster_defined_loss=Decimal("7400"),
-            total_open_defined_loss=Decimal("9200"),
+            index_cluster_defined_loss=Decimal("11500"),
+            total_open_defined_loss=Decimal("14500"),
         ),
     )
 
     assert result.approved
     assert result.quantity == 1
     assert result.awarded_risk == Decimal("398")
-    assert result.awarded_risk <= Decimal("3000")
-    assert result.awarded_risk <= Decimal("750")
-    assert result.awarded_risk <= Decimal("800")
+    assert result.awarded_risk <= Decimal("6000")
+    assert result.awarded_risk <= Decimal("500")
+    assert result.awarded_risk <= Decimal("500")
 
 
 @pytest.mark.asyncio

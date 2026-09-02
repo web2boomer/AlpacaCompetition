@@ -2,8 +2,13 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
+
+from money_machine.domain.enums import Action
 from money_machine.domain.schemas import OptionQuote
 from money_machine.execution import (
+    COMPETITION_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE,
+    DEBIT_STOP_VALUE_FRACTION,
     ManagedStructure,
     daily_hard_exit_deadline,
     entry_holding_policy,
@@ -164,6 +169,140 @@ def test_directional_debit_take_profit_and_stop_are_executable_quote_driven(
     assert (take_profit.should_close, take_profit.reason) == (True, "debit_take_profit")
     assert (stop.should_close, stop.reason) == (True, "debit_stop_loss")
     assert (timed.should_close, timed.reason) == (True, "maximum_holding_time")
+
+
+@pytest.mark.parametrize(
+    ("offset", "should_close"),
+    [
+        (Decimal("-0.01"), False),
+        (Decimal("0"), True),
+        (Decimal("0.01"), True),
+    ],
+)
+def test_competition_directional_debit_take_profit_boundary(
+    directional_candidate, offset: Decimal, should_close: bool
+) -> None:
+    opened_at = datetime(2026, 9, 3, 14, tzinfo=UTC)
+    managed = _managed(directional_candidate, opened_at=opened_at)
+    long_leg = next(leg for leg in managed.structure.legs if leg.side.value == "buy")
+    short_leg = next(leg for leg in managed.structure.legs if leg.side.value == "sell")
+    target = (
+        managed.structure.net_price * COMPETITION_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE + offset
+    )
+    quotes = {
+        long_leg.symbol: OptionQuote(
+            symbol=long_leg.symbol,
+            underlying=long_leg.underlying,
+            expiration=long_leg.expiration,
+            right=long_leg.right,
+            strike=long_leg.strike,
+            bid=target + Decimal("0.10"),
+            ask=target + Decimal("0.11"),
+            volume=100,
+            implied_volatility=Decimal("0.20"),
+            observed_at=opened_at,
+        ),
+        short_leg.symbol: OptionQuote(
+            symbol=short_leg.symbol,
+            underlying=short_leg.underlying,
+            expiration=short_leg.expiration,
+            right=short_leg.right,
+            strike=short_leg.strike,
+            bid=Decimal("0.09"),
+            ask=Decimal("0.10"),
+            volume=100,
+            implied_volatility=Decimal("0.20"),
+            observed_at=opened_at,
+        ),
+    }
+
+    signal = structure_exit_signal(managed, quotes=quotes, now=opened_at + timedelta(minutes=5))
+
+    assert signal.should_close is should_close
+    assert signal.executable_price == target
+    assert signal.reason == ("debit_take_profit" if should_close else "debit_exit_not_reached")
+
+
+def test_directional_debit_stop_remains_at_point_sixty_five(directional_candidate) -> None:
+    opened_at = datetime(2026, 9, 3, 14, tzinfo=UTC)
+    managed = _managed(directional_candidate, opened_at=opened_at)
+    long_leg = next(leg for leg in managed.structure.legs if leg.side.value == "buy")
+    short_leg = next(leg for leg in managed.structure.legs if leg.side.value == "sell")
+    stop_value = managed.structure.net_price * DEBIT_STOP_VALUE_FRACTION
+    quotes = {
+        long_leg.symbol: OptionQuote(
+            symbol=long_leg.symbol,
+            underlying=long_leg.underlying,
+            expiration=long_leg.expiration,
+            right=long_leg.right,
+            strike=long_leg.strike,
+            bid=stop_value + Decimal("0.10"),
+            ask=stop_value + Decimal("0.11"),
+            volume=100,
+            implied_volatility=Decimal("0.20"),
+            observed_at=opened_at,
+        ),
+        short_leg.symbol: OptionQuote(
+            symbol=short_leg.symbol,
+            underlying=short_leg.underlying,
+            expiration=short_leg.expiration,
+            right=short_leg.right,
+            strike=short_leg.strike,
+            bid=Decimal("0.09"),
+            ask=Decimal("0.10"),
+            volume=100,
+            implied_volatility=Decimal("0.20"),
+            observed_at=opened_at,
+        ),
+    }
+
+    signal = structure_exit_signal(managed, quotes=quotes, now=opened_at + timedelta(minutes=5))
+
+    assert signal.should_close
+    assert signal.reason == "debit_stop_loss"
+    assert signal.executable_price == stop_value
+
+
+def test_competition_directional_take_profit_does_not_apply_to_other_debits(
+    directional_candidate,
+) -> None:
+    opened_at = datetime(2026, 9, 3, 14, tzinfo=UTC)
+    structure = directional_candidate.structure.model_copy(update={"strategy": Action.HEDGE})
+    managed = replace(_managed(directional_candidate, opened_at=opened_at), structure=structure)
+    long_leg = next(leg for leg in structure.legs if leg.side.value == "buy")
+    short_leg = next(leg for leg in structure.legs if leg.side.value == "sell")
+    close_credit = structure.net_price * COMPETITION_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE
+    quotes = {
+        long_leg.symbol: OptionQuote(
+            symbol=long_leg.symbol,
+            underlying=long_leg.underlying,
+            expiration=long_leg.expiration,
+            right=long_leg.right,
+            strike=long_leg.strike,
+            bid=close_credit + Decimal("0.10"),
+            ask=close_credit + Decimal("0.11"),
+            volume=100,
+            implied_volatility=Decimal("0.20"),
+            observed_at=opened_at,
+        ),
+        short_leg.symbol: OptionQuote(
+            symbol=short_leg.symbol,
+            underlying=short_leg.underlying,
+            expiration=short_leg.expiration,
+            right=short_leg.right,
+            strike=short_leg.strike,
+            bid=Decimal("0.09"),
+            ask=Decimal("0.10"),
+            volume=100,
+            implied_volatility=Decimal("0.20"),
+            observed_at=opened_at,
+        ),
+    }
+
+    signal = structure_exit_signal(managed, quotes=quotes, now=opened_at + timedelta(minutes=5))
+
+    assert not signal.should_close
+    assert signal.reason == "debit_exit_not_reached"
 
 
 def test_daily_hard_boundary_is_urgent_and_prevents_overnight_roll(replay_candidate) -> None:

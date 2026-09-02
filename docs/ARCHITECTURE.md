@@ -41,15 +41,15 @@ Defaults are conservative and transparent, not statistically optimized: 90-secon
 
 Risk is deterministic and based on current equity and defined maximum loss, never the
 broker's buying-power multiple. Index/directional structures normally receive at most
-1.50% of equity; a liquid index candidate can receive at most 4.00% only when validated
+3.00% of equity; a liquid index candidate can receive at most 6.00% only when validated
 model confidence is at least 0.80 and every hard gate passes. Condors use richness of at
 least 1.50 and reward/risk of at least 0.25 as their strategy-specific confirmation.
 Directional debit spreads on SPY, QQQ, and IWM do not use richness for upsizing; they
 require at least 0.50% deterministic trend strength, at least 2.00 reward/risk, and debit
 no greater than one-third of spread width so expensive premium alone cannot trigger the
 larger tier. Earnings stays
-at 0.35%. The shared SPY/QQQ/IWM cap is 8.00%, total concurrent defined loss is capped at
-10.00%, daily loss at 4.00%, and peak drawdown at 8.00%. A candidate is excluded when its
+at 0.35%. The shared SPY/QQQ/IWM cap is 12.00%, total concurrent defined loss is capped at
+15.00%, daily loss at 6.00%, and peak drawdown at 12.00%. A candidate is excluded when its
 underlying already has a managed structure or pending entry; raw parent count is not a second
 portfolio veto. Quantity is always floored from the smallest remaining applicable budget, and
 the effective tier, per-underlying evidence, correlated headroom, and total headroom are recorded
@@ -64,6 +64,11 @@ and persist a deadline no later than 15 minutes before the next macro event; con
 cooldowns and explicit upstream event vetoes remain fail closed. Soft maximum-hold/profit exits use quote-aware
 backoff, while urgent safety exits retain aggressive bounded concessions.
 
+On the final competition day, the 08:30 ET Productivity/international-trade release retains a
+75-minute fail-closed cooldown, making 09:45 ET the earliest possible entry. Directional debit
+spreads require the existing two-cycle post-open confirmation and use an executable-quote
+take-profit at 1.08 times opening debit; their 0.65 premium-value stop and 60-minute cap remain.
+
 During the final September 2–3 competition recovery window, the production selector is
 directional-only for new entries. Condors remain in the complete candidate report for audit and
 counterfactual analysis but are deterministically excluded before model selection. Directional
@@ -73,7 +78,7 @@ Production entry authority is additionally restricted to 09:45–15:20 ET, while
 the immutable 14:30 ET competition cutoff. These selector controls do
 not weaken reconciliation or lifecycle ownership of previously established structures.
 
-The daily-loss control is persistent and session-scoped. A raw 4.00% breach immediately
+The daily-loss control is persistent and session-scoped. A raw 6.00% breach immediately
 freezes entries, but a clean defined-risk book is force-closed only after a second account
 observation and complete fresh executable leg quotes validate a plausible loss. A loss beyond
 the persisted defined-loss envelope (plus a documented tolerance) remains quarantined for
