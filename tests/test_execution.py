@@ -188,6 +188,40 @@ def test_entry_holding_policy_clamps_and_rejects_too_late() -> None:
     assert rejected.reason == "insufficient_tradable_session_window"
 
 
+def test_directional_holding_policy_clamps_model_and_event_deadline() -> None:
+    opened_at = datetime(2026, 9, 2, 16, 50, tzinfo=UTC)
+    event_deadline = datetime(2026, 9, 2, 17, 45, tzinfo=UTC)
+
+    policy = entry_holding_policy(
+        opened_at,
+        360,
+        maximum_holding_minutes=60,
+        hard_deadline=event_deadline,
+    )
+
+    assert policy.accepted
+    assert policy.effective_holding_minutes == 55
+    assert policy.effective_deadline == event_deadline
+    assert policy.reason == "directional_or_session_boundary"
+
+
+def test_lifecycle_closes_at_persisted_event_safe_deadline(replay_candidate) -> None:
+    opened_at = datetime(2026, 9, 2, 16, 50, tzinfo=UTC)
+    managed = replace(
+        _managed(replay_candidate, opened_at=opened_at),
+        maximum_holding_minutes=55,
+    )
+
+    signal = structure_exit_signal(
+        managed,
+        quotes={},
+        now=datetime(2026, 9, 2, 17, 45, tzinfo=UTC),
+    )
+
+    assert signal.should_close
+    assert signal.reason == "maximum_holding_time"
+
+
 def test_daily_deadline_is_dst_aware_and_thursday_flatten_is_earlier() -> None:
     assert daily_hard_exit_deadline(datetime(2026, 7, 1, 14, tzinfo=UTC)).hour == 19
     assert daily_hard_exit_deadline(datetime(2026, 1, 5, 15, tzinfo=UTC)).hour == 20

@@ -91,15 +91,29 @@ def daily_hard_exit_deadline(at: datetime) -> datetime:
     return datetime.combine(local.date(), DAILY_HARD_EXIT_TIME, tzinfo=NEW_YORK).astimezone(UTC)
 
 
-def entry_holding_policy(at: datetime, model_holding_minutes: int) -> EntryHoldingPolicy:
+def entry_holding_policy(
+    at: datetime,
+    model_holding_minutes: int,
+    *,
+    maximum_holding_minutes: int | None = None,
+    hard_deadline: datetime | None = None,
+) -> EntryHoldingPolicy:
     now = at.astimezone(UTC)
     boundary = min(daily_hard_exit_deadline(now), FORCED_FLATTEN_STARTS_AT)
+    if hard_deadline is not None:
+        boundary = min(boundary, hard_deadline.astimezone(UTC))
     available = max(timedelta(0), boundary - now)
-    effective = min(timedelta(minutes=model_holding_minutes), available)
-    accepted = model_holding_minutes > 0 and available >= MINIMUM_ENTRY_WINDOW
-    reason = (
-        "model_hold" if effective == timedelta(minutes=model_holding_minutes) else "daily_boundary"
-    )
+    requested_minutes = model_holding_minutes
+    if maximum_holding_minutes is not None:
+        requested_minutes = min(requested_minutes, maximum_holding_minutes)
+    effective = min(timedelta(minutes=requested_minutes), available)
+    accepted = requested_minutes > 0 and effective >= MINIMUM_ENTRY_WINDOW
+    if effective == timedelta(minutes=model_holding_minutes):
+        reason = "model_hold"
+    elif maximum_holding_minutes is not None or hard_deadline is not None:
+        reason = "directional_or_session_boundary"
+    else:
+        reason = "daily_boundary"
     if not accepted:
         reason = "insufficient_tradable_session_window"
     return EntryHoldingPolicy(

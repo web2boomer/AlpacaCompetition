@@ -11,8 +11,8 @@ from money_machine.domain.schemas import (
 )
 from money_machine.execution import entry_holding_policy
 
-INDEX_PER_STRUCTURE_PCT = Decimal("0.01")
-HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT = Decimal("0.03")
+INDEX_PER_STRUCTURE_PCT = Decimal("0.015")
+HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT = Decimal("0.04")
 EARNINGS_PER_STRUCTURE_PCT = Decimal("0.0035")
 HIGH_CONVICTION_MIN_CONFIDENCE = Decimal("0.80")
 HIGH_CONVICTION_MIN_RICHNESS_RATIO = Decimal("1.50")
@@ -20,10 +20,10 @@ HIGH_CONVICTION_MIN_CONDOR_REWARD_RISK_RATIO = Decimal("0.25")
 HIGH_CONVICTION_MIN_DIRECTIONAL_TREND_STRENGTH = Decimal("0.005")
 HIGH_CONVICTION_MIN_DIRECTIONAL_REWARD_RISK_RATIO = Decimal("2.00")
 HIGH_CONVICTION_MAX_DEBIT_TO_WIDTH_RATIO = Decimal("1") / Decimal("3")
-INDEX_CLUSTER_PCT = Decimal("0.06")
-TOTAL_DEFINED_LOSS_PCT = Decimal("0.08")
-DAILY_LOSS_PCT = Decimal("0.03")
-COMPETITION_DRAWDOWN_PCT = Decimal("0.06")
+INDEX_CLUSTER_PCT = Decimal("0.08")
+TOTAL_DEFINED_LOSS_PCT = Decimal("0.10")
+DAILY_LOSS_PCT = Decimal("0.04")
+COMPETITION_DRAWDOWN_PCT = Decimal("0.08")
 MAX_DATA_AGE_SECONDS = 90
 INDEX_UNDERLYINGS = frozenset({"SPY", "QQQ", "IWM"})
 INDEX_ACTIONS = frozenset({Action.INDEX_CONDOR, Action.CALL_DEBIT_SPREAD, Action.PUT_DEBIT_SPREAD})
@@ -150,7 +150,12 @@ def evaluate_risk(
         drawdown_limit,
         RiskReason.DRAWDOWN,
     )
-    holding = entry_holding_policy(context.now, decision.maximum_holding_minutes)
+    holding = entry_holding_policy(
+        context.now,
+        decision.maximum_holding_minutes,
+        maximum_holding_minutes=candidate.maximum_holding_minutes or None,
+        hard_deadline=candidate.holding_deadline,
+    )
     add(
         "session_holding_window",
         holding.accepted,
@@ -160,7 +165,10 @@ def evaluate_risk(
             f"effective_deadline={holding.effective_deadline.isoformat()}; "
             f"clamp_reason={holding.reason}"
         ),
-        "at least 30 tradable minutes remain before the 15:50 ET or competition boundary",
+        (
+            "at least 30 tradable minutes remain before the directional event-safe, "
+            "15:50 ET, or competition boundary"
+        ),
         RiskReason.NOT_FULL_EXECUTION,
     )
     add(

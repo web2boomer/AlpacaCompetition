@@ -28,7 +28,7 @@ Primary objective: finish the competition with positive, verifiable P&L while de
 Target outcomes:
 
 - Total return target: +0.5% to +1.5% on the $100,000 competition account.
-- Maximum peak-to-trough drawdown: less than 2.0%.
+- Maximum peak-to-trough drawdown stop: 8.0% during the final competition sprint.
 - No unauthorized, live-money, naked-option, or wrong-account orders.
 - Every order traceable to one agent decision and one risk decision.
 - A judge can understand the agent's last decision within 30 seconds.
@@ -187,7 +187,12 @@ including after the formal Friday end.
 
 Official P&L is measured from Monday's open using the fresh competition account and final account equity is taken after Thursday's close. Every position is therefore scheduled flat before Thursday's closing bell; the Friday hackathon deadline is not treated as extra trading time. September 4 also contains the 8:30 AM EDT Employment Situation release, so no exposure is carried into it.
 
-For this one-off event, the reviewed BLS, BEA, and Federal Reserve release times are also version-controlled. Candidate generation abstains when its six-hour intended holding period would cross JOLTS, the September 2 labor release or Beige Book, the September 3 productivity/trade releases, or the September 4 Employment Situation, and observes a short post-release cooldown.
+For this one-off event, the reviewed BLS, BEA, and Federal Reserve release times are also
+version-controlled. Condors retain the conservative six-hour overlap veto. Directional debit
+spreads instead have a hard 60-minute maximum hold and a 15-minute pre-release buffer: entry is
+allowed only when at least 30 minutes remain and the persisted lifecycle deadline does not cross
+that buffer. Every strategy observes the configured post-release cooldown, and an explicit
+upstream event-risk flag always vetoes entry.
 
 Boundary tests are required for one second before, exactly at, and one second after every transition.
 
@@ -207,7 +212,8 @@ A directional candidate must retain the same sign and at least 0.40% absolute re
 close across the current and immediately preceding completed five-minute observation. The cycle
 buckets must be 5–10 minutes apart. Missing, weak, reversed, malformed, or stale prior evidence
 fails closed, and both observation timestamps and trend values are sealed in the Passport. The
-existing high-conviction requirements and 1%/3% sizing tiers remain unchanged.
+existing high-conviction requirements remain unchanged; final-sprint sizing is 1.5% standard and
+4% qualifying high conviction.
 
 Each loop:
 
@@ -338,8 +344,8 @@ The agent may purchase a small put debit spread when portfolio exposure breaches
 
 Competition limits:
 
-- Maximum loss per index or directional structure: 1.00% of current equity.
-- High-conviction liquid index tier: up to 3.00% of current equity only when validated
+- Maximum loss per index or directional structure: 1.50% of current equity.
+- High-conviction liquid index tier: up to 4.00% of current equity only when validated
   model confidence is at least 0.80 and every existing data, liquidity, reconciliation,
   event, directional, and portfolio gate passes. Premium-selling index condors additionally
   require richness of at least 1.50 and reward/risk of at least 0.25. Directional debit
@@ -348,18 +354,18 @@ Competition limits:
   richness never qualifies a debit spread for larger sizing because it can reflect expensive
   option premium. Earnings candidates are never eligible for this tier.
 - Maximum loss per earnings structure: 0.35% of current equity.
-- Maximum combined SPY/QQQ/IWM cluster loss: 6.00% of current equity.
-- Maximum total concurrent defined loss: 8.00% of current equity.
-- Daily realized plus unrealized loss stop: 3.00% of start-of-day equity.
+- Maximum combined SPY/QQQ/IWM cluster loss: 8.00% of current equity.
+- Maximum total concurrent defined loss: 10.00% of current equity.
+- Daily realized plus unrealized loss stop: 4.00% of start-of-day equity.
 - A raw daily-loss breach freezes new entries immediately. Liquidation of a clean, fully
   reconciled defined-risk book requires a second broker equity observation plus complete,
   fresh, internally consistent executable leg quotes. A loss materially beyond the persisted
   defined-loss envelope is quarantined as a mark-quality incident rather than treated as a
   credible liquidation signal. A validated breach latches the entry halt through the UTC
   session; reconciliation and other structural safety incidents retain immediate close authority.
-- Competition peak-to-trough drawdown stop: 6.00%.
+- Competition peak-to-trough drawdown stop: 8.00%.
 - Maximum one managed or pending alpha structure per underlying. Raw parent-order count is not
-  an independent veto; authoritative 6.00% correlated-cluster and 8.00% total defined-loss caps
+  an independent veto; authoritative 8.00% correlated-cluster and 10.00% total defined-loss caps
   remain final portfolio limits.
 - Maximum one pending entry per underlying.
 - No pyramiding, adding to, or resizing an existing managed structure.
@@ -410,8 +416,10 @@ new idempotent emergency-close series with a unique deterministic client ID and 
 marketable multi-leg limits.
 
 Every approved entry records an effective holding deadline equal to the earliest of the model's
-requested hold, the 3:50 PM ET daily hard exit, and Thursday's forced-flatten boundary. At least
-30 minutes must remain before that deadline or the entry fails closed.
+requested hold, the 3:50 PM ET daily hard exit, and Thursday's forced-flatten boundary.
+Directional spreads additionally clamp the model hold to 60 minutes and to 15 minutes before the
+next scheduled event. At least 30 minutes must remain before the effective deadline or the entry
+fails closed.
 
 ### 11.3 Reconciliation
 

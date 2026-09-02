@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
 from money_machine.domain.enums import Action, OptionRight, PositionIntent, Side
-from money_machine.domain.events import scheduled_macro_event_risk
+from money_machine.domain.events import directional_event_window, scheduled_macro_event_risk
 from money_machine.domain.options import MULTIPLIER, calculate_maximum_loss
 from money_machine.domain.schemas import (
     Candidate,
@@ -46,13 +46,13 @@ def build_candidates(
     rejected_candidates: list[tuple[Candidate, str]] = []
     rejections: dict[str, tuple[str, ...]] = {}
     for snapshot in snapshots:
-        snapshot = snapshot.model_copy(
+        condor_snapshot = snapshot.model_copy(
             update={"event_risk": snapshot.event_risk or scheduled_macro_event_risk(now)}
         )
         symbol_candidates: list[Candidate] = []
         reasons: list[str] = []
         chain = chains.get(snapshot.symbol, [])
-        condor = _build_condor(snapshot, chain, now, reasons)
+        condor = _build_condor(condor_snapshot, chain, now, reasons)
         if condor:
             reward_risk = condor.payoff_quality_ratio or (
                 condor.structure.maximum_profit / condor.structure.maximum_loss
@@ -192,7 +192,11 @@ def _build_directional(
     if abs(snapshot.trend_return_pct) < DIRECTIONAL_TREND_THRESHOLD:
         return None
     if snapshot.event_risk:
-        reasons.append("event risk vetoed directional structure")
+        reasons.append("explicit upstream event risk vetoed directional structure")
+        return None
+    event_window = directional_event_window(now)
+    if not event_window.accepted:
+        reasons.append(event_window.reason.replace("_", " "))
         return None
     expiry_groups = _fresh_expiry_groups(chain, now)
     if not expiry_groups:
@@ -251,11 +255,17 @@ def _build_directional(
         trend_strength=abs(snapshot.trend_return_pct),
         direction_agrees=True,
         minimum_confidence=DIRECTIONAL_MIN_CONFIDENCE,
+        maximum_holding_minutes=event_window.maximum_holding_minutes,
+        holding_deadline=event_window.deadline,
         gate_evidence=(
             f"deterministic trend {snapshot.trend_return_pct:.2%}",
             f"defined debit ${debit:.2f}",
             f"maximum loss ${maximum_loss:.2f} per contract",
             f"reward/risk {(maximum_profit / maximum_loss):.2f}",
+            (
+                f"event-safe holding deadline {event_window.deadline.isoformat()} "
+                f"({event_window.maximum_holding_minutes} minutes; {event_window.reason})"
+            ),
         ),
     )
 

@@ -41,15 +41,15 @@ Defaults are conservative and transparent, not statistically optimized: 90-secon
 
 Risk is deterministic and based on current equity and defined maximum loss, never the
 broker's buying-power multiple. Index/directional structures normally receive at most
-1.00% of equity; a liquid index candidate can receive at most 3.00% only when validated
+1.50% of equity; a liquid index candidate can receive at most 4.00% only when validated
 model confidence is at least 0.80 and every hard gate passes. Condors use richness of at
 least 1.50 and reward/risk of at least 0.25 as their strategy-specific confirmation.
 Directional debit spreads on SPY, QQQ, and IWM do not use richness for upsizing; they
 require at least 0.50% deterministic trend strength, at least 2.00 reward/risk, and debit
 no greater than one-third of spread width so expensive premium alone cannot trigger the
 larger tier. Earnings stays
-at 0.35%. The shared SPY/QQQ/IWM cap is 6.00%, total concurrent defined loss is capped at
-8.00%, daily loss at 3.00%, and peak drawdown at 6.00%. A candidate is excluded when its
+at 0.35%. The shared SPY/QQQ/IWM cap is 8.00%, total concurrent defined loss is capped at
+10.00%, daily loss at 4.00%, and peak drawdown at 8.00%. A candidate is excluded when its
 underlying already has a managed structure or pending entry; raw parent count is not a second
 portfolio veto. Quantity is always floored from the smallest remaining applicable budget, and
 the effective tier, per-underlying evidence, correlated headroom, and total headroom are recorded
@@ -59,7 +59,9 @@ Index condors must clear 0.20 reward/risk using adverse executable bid/ask econo
 model auction; the 0.25 high-conviction threshold remains stricter and unchanged. Rejected
 structures remain in the complete CandidateBuildReport for audit and counterfactual analysis.
 Entries also require at least 30 minutes before the earliest of the model hold, the 3:50 PM ET
-daily hard exit, and Thursday forced flatten. Soft maximum-hold/profit exits use quote-aware
+daily hard exit, and Thursday forced flatten. Directional spreads cap the model hold at 60 minutes
+and persist a deadline no later than 15 minutes before the next macro event; configured event
+cooldowns and explicit upstream event vetoes remain fail closed. Soft maximum-hold/profit exits use quote-aware
 backoff, while urgent safety exits retain aggressive bounded concessions.
 
 During the final September 2–3 competition recovery window, the production selector is
@@ -70,7 +72,7 @@ least 0.40% absolute return from previous close; missing, reversed, weak, or sta
 Production entry authority is additionally restricted to 09:45–14:30 ET. These selector controls do
 not weaken reconciliation or lifecycle ownership of previously established structures.
 
-The daily-loss control is persistent and session-scoped. A raw 3.00% breach immediately
+The daily-loss control is persistent and session-scoped. A raw 4.00% breach immediately
 freezes entries, but a clean defined-risk book is force-closed only after a second account
 observation and complete fresh executable leg quotes validate a plausible loss. A loss beyond
 the persisted defined-loss envelope (plus a documented tolerance) remains quarantined for

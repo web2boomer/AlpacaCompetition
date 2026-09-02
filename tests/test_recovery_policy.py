@@ -207,10 +207,10 @@ async def test_production_passport_preserves_condors_and_records_policy_exclusio
 
 
 def test_recovery_does_not_change_live_directional_risk_policy() -> None:
-    assert Decimal("0.01") == INDEX_PER_STRUCTURE_PCT
-    assert Decimal("0.03") == HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT
-    assert Decimal("0.06") == INDEX_CLUSTER_PCT
-    assert Decimal("0.08") == TOTAL_DEFINED_LOSS_PCT
+    assert Decimal("0.015") == INDEX_PER_STRUCTURE_PCT
+    assert Decimal("0.04") == HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT
+    assert Decimal("0.08") == INDEX_CLUSTER_PCT
+    assert Decimal("0.10") == TOTAL_DEFINED_LOSS_PCT
     assert Decimal("0.80") == HIGH_CONVICTION_MIN_CONFIDENCE
     assert Decimal("0.005") == HIGH_CONVICTION_MIN_DIRECTIONAL_TREND_STRENGTH
     assert Decimal("2.00") == HIGH_CONVICTION_MIN_DIRECTIONAL_REWARD_RISK_RATIO

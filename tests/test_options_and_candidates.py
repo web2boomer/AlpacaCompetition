@@ -10,7 +10,7 @@ from money_machine.domain.candidates import (
     build_candidates,
 )
 from money_machine.domain.enums import Action, ExecutionState, OptionRight, Regime, Side
-from money_machine.domain.events import scheduled_macro_event_risk
+from money_machine.domain.events import directional_event_window, scheduled_macro_event_risk
 from money_machine.domain.options import calculate_maximum_loss, validate_defined_risk
 from money_machine.domain.risk import evaluate_risk
 from money_machine.domain.schemas import ModelDecision, RiskContext
@@ -183,6 +183,61 @@ def test_competition_macro_release_blocks_crossing_hold_and_cools_down() -> None
     assert not scheduled_macro_event_risk(datetime(2026, 9, 1, 14, 31, tzinfo=UTC))
 
 
+def test_directional_event_window_restores_morning_runway_and_enforces_boundary() -> None:
+    morning = directional_event_window(datetime(2026, 9, 2, 14, 31, tzinfo=UTC))
+    too_close = directional_event_window(datetime(2026, 9, 2, 17, 21, tzinfo=UTC))
+    cooldown = directional_event_window(datetime(2026, 9, 2, 18, 15, tzinfo=UTC))
+
+    assert morning.accepted
+    assert morning.maximum_holding_minutes == 60
+    assert morning.deadline == datetime(2026, 9, 2, 15, 31, tzinfo=UTC)
+    assert not too_close.accepted
+    assert too_close.deadline == datetime(2026, 9, 2, 17, 45, tzinfo=UTC)
+    assert "insufficient_event_safe_window" in too_close.reason
+    assert not cooldown.accepted
+    assert "cooldown" in cooldown.reason
+
+
+@pytest.mark.asyncio
+async def test_directional_candidate_uses_event_safe_window_not_six_hour_condor_horizon(
+    replay_adapter,
+) -> None:
+    now = datetime(2026, 9, 2, 14, 31, tzinfo=UTC)
+    snapshot, chain = await iwm_directional_inputs(replay_adapter, bullish=True)
+    chain = [quote.model_copy(update={"observed_at": now}) for quote in chain]
+
+    report = build_candidates([snapshot], {"IWM": chain}, now)
+    candidate = only_directional_candidate(report)
+
+    assert candidate.maximum_holding_minutes == 60
+    assert candidate.holding_deadline == now + timedelta(minutes=60)
+    assert not candidate.event_risk
+    assert any("event-safe holding deadline" in item for item in candidate.gate_evidence)
+
+
+@pytest.mark.asyncio
+async def test_directional_candidate_rejects_near_event_boundary_and_upstream_veto(
+    replay_adapter,
+) -> None:
+    near_event = datetime(2026, 9, 2, 17, 21, tzinfo=UTC)
+    snapshot, chain = await iwm_directional_inputs(replay_adapter, bullish=False)
+    fresh_chain = [quote.model_copy(update={"observed_at": near_event}) for quote in chain]
+
+    boundary_report = build_candidates([snapshot], {"IWM": fresh_chain}, near_event)
+    upstream_report = build_candidates(
+        [snapshot.model_copy(update={"event_risk": True})],
+        {"IWM": fresh_chain},
+        datetime(2026, 9, 2, 14, 31, tzinfo=UTC),
+    )
+
+    assert not any(
+        item.action in {Action.CALL_DEBIT_SPREAD, Action.PUT_DEBIT_SPREAD}
+        for item in boundary_report.candidates
+    )
+    assert "insufficient event safe window" in " ".join(boundary_report.rejections["IWM"])
+    assert "explicit upstream event risk vetoed" in " ".join(upstream_report.rejections["IWM"])
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("bullish", "expected_action", "expected_right"),
@@ -245,7 +300,7 @@ async def test_iwm_directional_compiler_honors_event_veto(replay_adapter) -> Non
     report = build_candidates([snapshot], {"IWM": chain}, replay_adapter.observed_at)
 
     assert report.candidates == ()
-    assert "event risk vetoed directional structure" in report.rejections["IWM"]
+    assert "explicit upstream event risk vetoed directional structure" in report.rejections["IWM"]
 
 
 @pytest.mark.asyncio
@@ -258,10 +313,10 @@ async def test_iwm_directional_candidate_sizes_with_existing_index_caps(replay_a
     result = evaluate_risk(model_decision(candidate), candidate, risk_context())
 
     assert result.approved
-    assert result.quantity == int(Decimal("1000") // candidate.structure.maximum_loss)
+    assert result.quantity == int(Decimal("1500") // candidate.structure.maximum_loss)
     assert result.awarded_risk == candidate.structure.maximum_loss * result.quantity
-    assert result.awarded_risk <= Decimal("1000")
-    assert risk_check(result, "effective_per_structure_percent").actual == "0.01"
+    assert result.awarded_risk <= Decimal("1500")
+    assert risk_check(result, "effective_per_structure_percent").actual == "0.015"
 
 
 @pytest.mark.asyncio
@@ -293,9 +348,9 @@ async def test_iwm_directional_distinct_underlying_remains_eligible(replay_adapt
     assert result.approved
     assert candidate.structure.maximum_loss == Decimal("120.00")
     assert candidate.structure.maximum_profit == Decimal("380.00")
-    assert result.quantity == 25
-    assert result.awarded_risk == Decimal("3000.00")
-    assert risk_check(result, "effective_per_structure_percent").actual == "0.03"
+    assert result.quantity == 33
+    assert result.awarded_risk == Decimal("3960.00")
+    assert risk_check(result, "effective_per_structure_percent").actual == "0.04"
     assert (
         "candidate_underlying=IWM"
         in risk_check(result, "portfolio_underlying_diversification").actual

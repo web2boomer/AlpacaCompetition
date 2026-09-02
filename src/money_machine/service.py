@@ -428,7 +428,15 @@ class AgentService:
                 daily_loss_entry_halt_active=daily_control.status in {"provisional", "latched"},
             )
             risk = evaluate_risk(envelope.decision, selected, context)
-            holding_policy = entry_holding_policy(now, envelope.decision.maximum_holding_minutes)
+            holding_policy = entry_holding_policy(
+                now,
+                envelope.decision.maximum_holding_minutes,
+                maximum_holding_minutes=(
+                    selected.maximum_holding_minutes if selected is not None else None
+                )
+                or None,
+                hard_deadline=selected.holding_deadline if selected is not None else None,
+            )
             if risk.approved:
                 envelope = envelope.model_copy(
                     update={

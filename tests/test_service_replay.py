@@ -211,9 +211,9 @@ async def test_replay_end_to_end_generates_decision_passport(
     assert outcome.passport["risk"]["approved"]
     checks = {item["name"]: item for item in outcome.passport["risk"]["checks"]}
     assert "applied=false" in checks["high_conviction_index_tier"]["actual"]
-    assert checks["effective_per_structure_percent"]["actual"] == "0.01"
+    assert checks["effective_per_structure_percent"]["actual"] == "0.015"
     assert Decimal(checks["effective_per_structure_budget"]["actual"]) == (
-        Decimal(outcome.passport["account"]["equity"]) * Decimal("0.01")
+        Decimal(outcome.passport["account"]["equity"]) * Decimal("0.015")
     )
     assert outcome.passport["execution"]["order_type"] == "limit"
     assert outcome.passport["counterfactuals"]["label"].startswith("HYPOTHETICAL")
@@ -332,7 +332,7 @@ async def test_portfolio_filter_excludes_qqq_but_preserves_full_report_and_selec
     )
     checks = {item["name"]: item for item in outcome.passport["risk"]["checks"]}
     assert "candidate_underlying=SPY" in checks["portfolio_underlying_diversification"]["actual"]
-    assert checks["effective_per_structure_percent"]["actual"] == "0.03"
+    assert checks["effective_per_structure_percent"]["actual"] == "0.04"
 
 
 @pytest.mark.asyncio
@@ -426,6 +426,9 @@ async def test_directional_entry_fill_take_profit_atomic_close_and_terminal_norm
         if candidate["candidate_id"] == opened.passport["decision"]["candidate_id"]
     )
     assert selected["action"] in {"call_debit_spread", "put_debit_spread"}
+    assert selected["maximum_holding_minutes"] == 60
+    assert opened.passport["decision"]["maximum_holding_minutes"] == 60
+    assert repository.open_managed_structures()[0].maximum_holding_minutes == 60
     assert len(replay_adapter.submitted_requests) == 1
     assert len(replay_adapter.submitted_requests[0].legs) == 2
     assert replay_adapter.submitted_orders[0].status == "filled"
@@ -1229,7 +1232,7 @@ async def test_two_credible_breaches_with_fresh_complete_quotes_latch_and_close(
     for chain in replay_adapter.data["chains"].values():
         for quote in chain:
             quote["observed_at"] = cycle_at.isoformat()
-    accounts = iter((account_at("97390.00"), account_at("97400.00")))
+    accounts = iter((account_at("95900.00"), account_at("95910.00")))
 
     async def sequenced_account() -> AccountSnapshot:
         return next(accounts)
@@ -1263,7 +1266,7 @@ async def test_stale_quotes_freeze_entries_without_forced_liquidation(
 ) -> None:
     await seed_managed_position(settings, repository, replay_adapter)
     before = len(replay_adapter.submitted_requests)
-    accounts = iter((account_at("96900.00"), account_at("96850.00")))
+    accounts = iter((account_at("95900.00"), account_at("95850.00")))
 
     async def sequenced_account() -> AccountSnapshot:
         return next(accounts)

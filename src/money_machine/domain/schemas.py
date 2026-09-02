@@ -125,6 +125,8 @@ class Candidate(StrictModel):
     direction_agrees: bool = True
     minimum_confidence: Decimal = Decimal("0")
     payoff_quality_ratio: Decimal | None = Field(default=None, ge=0)
+    maximum_holding_minutes: int = Field(default=0, ge=0, le=60)
+    holding_deadline: datetime | None = None
     gate_evidence: tuple[str, ...]
 
 
