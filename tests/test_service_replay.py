@@ -877,7 +877,7 @@ async def test_filled_close_refresh_prevents_already_filled_cancel_regression(
     service, _close_request, _close_broker_id = await seed_pending_close(
         settings, repository, replay_adapter
     )
-    replay_adapter.data["positions"] = replay_adapter.data["positions"][:2]
+    replay_adapter.data["positions"] = []
     repository.set_kill_switch(active=True, now=replay_adapter.observed_at)
 
     async def filled_order(_broker_order_id: str):
@@ -904,6 +904,87 @@ async def test_filled_close_refresh_prevents_already_filled_cancel_regression(
         for event in outcome.passport["operational_state"]["lifecycle_events"]
     )
     assert repository.open_managed_structures() == ()
+
+
+@pytest.mark.asyncio
+async def test_flat_filled_close_accepts_parent_already_closed_by_position_absence(
+    settings, repository, replay_adapter, monkeypatch
+) -> None:
+    service, close_request, _close_broker_id = await seed_pending_close(
+        settings, repository, replay_adapter
+    )
+    replay_adapter.data["positions"] = []
+
+    async def filled_order(_broker_order_id: str):
+        return {
+            "status": "filled",
+            "qty": str(close_request.quantity),
+            "filled_qty": str(close_request.quantity),
+        }
+
+    monkeypatch.setattr(replay_adapter, "order_by_id", filled_order)
+    request_count = len(replay_adapter.submitted_requests)
+
+    outcome = await service.run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at + timedelta(minutes=5),
+        mode=RunMode.LIVE,
+    )
+
+    assert outcome.passport["operational_state"]["reconciliation_clean"] is True
+    assert outcome.passport["operational_state"]["incidents"] == []
+    assert len(replay_adapter.submitted_requests) == request_count
+    assert repository.open_managed_structures() == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("broker_payload", "positions", "incident"),
+    [
+        (
+            {"status": "filled", "qty": "2", "filled_qty": "2"},
+            [],
+            "mismatched_filled_close_quantity",
+        ),
+        (
+            {"status": "filled", "qty": "1", "filled_qty": "1"},
+            "retain",
+            "filled_close_residual_positions",
+        ),
+    ],
+)
+async def test_filled_close_mismatch_or_residual_positions_remains_fail_closed(
+    settings,
+    repository,
+    replay_adapter,
+    monkeypatch,
+    broker_payload,
+    positions,
+    incident,
+) -> None:
+    service, _close_request, _close_broker_id = await seed_pending_close(
+        settings, repository, replay_adapter
+    )
+    if positions != "retain":
+        replay_adapter.data["positions"] = positions
+
+    async def filled_order(_broker_order_id: str):
+        return broker_payload
+
+    monkeypatch.setattr(replay_adapter, "order_by_id", filled_order)
+    request_count = len(replay_adapter.submitted_requests)
+
+    outcome = await service.run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at + timedelta(minutes=5),
+        mode=RunMode.LIVE,
+    )
+
+    assert outcome.passport["operational_state"]["reconciliation_clean"] is False
+    assert incident in outcome.passport["operational_state"]["incidents"]
+    assert len(replay_adapter.submitted_requests) == request_count
 
 
 @pytest.mark.asyncio

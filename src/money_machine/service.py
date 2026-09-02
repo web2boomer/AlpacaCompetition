@@ -607,13 +607,38 @@ class AgentService:
                         order.client_order_id, status=broker_status, now=now
                     )
                     if broker_status == "filled":
-                        parent_closed = self.repository.mark_managed_structure_closed(
-                            order.candidate_id.removesuffix(":close"),
-                            now=now,
-                            parent_client_order_id=order.parent_client_order_id,
+                        reported_quantity = broker_order.get("qty")
+                        reported_filled = broker_order.get("filled_qty")
+                        quantity_mismatch = (
+                            reported_quantity is not None
+                            and Decimal(str(reported_quantity)) != Decimal(order.quantity)
+                        ) or (
+                            reported_filled is not None
+                            and Decimal(str(reported_filled)) != Decimal(order.quantity)
                         )
-                        if not parent_closed:
-                            incidents.append("ambiguous_filled_close_parent")
+                        position_symbols = {
+                            str(position.get("symbol"))
+                            for position in positions
+                            if Decimal(str(position.get("qty") or 0)) != 0
+                        }
+                        residual_legs = position_symbols.intersection(
+                            leg.symbol for leg in order.legs
+                        )
+                        if quantity_mismatch:
+                            incidents.append("mismatched_filled_close_quantity")
+                            active_closing_candidates.add(order.candidate_id.removesuffix(":close"))
+                        elif residual_legs:
+                            incidents.append("filled_close_residual_positions")
+                            active_closing_candidates.add(order.candidate_id.removesuffix(":close"))
+                        else:
+                            parent_closed = self.repository.mark_managed_structure_closed(
+                                order.candidate_id.removesuffix(":close"),
+                                now=now,
+                                parent_client_order_id=order.parent_client_order_id,
+                                expected_quantity=order.quantity,
+                            )
+                            if not parent_closed:
+                                incidents.append("ambiguous_filled_close_parent")
                     events.append(
                         {
                             "event": "closing_order_terminal_reconciled",

@@ -715,13 +715,22 @@ class AuditRepository:
         *,
         now: datetime,
         parent_client_order_id: str | None = None,
+        expected_quantity: int | None = None,
     ) -> bool:
         with self.database.session() as session:
-            query = select(BrokerOrderORM).where(
-                BrokerOrderORM.status.in_(
-                    ("filled", "closing", "partially_filled_canceled", "externally_reduced")
-                )
+            eligible_statuses: tuple[str, ...] = (
+                "filled",
+                "closing",
+                "partially_filled_canceled",
+                "externally_reduced",
             )
+            if parent_client_order_id:
+                # Authoritative position absence can close the exact parent before the
+                # subsequent order-by-id refresh observes its close parent as filled.
+                # Treat that already-closed row as an idempotent success, but only for
+                # the explicit parent link and exact quantity.
+                eligible_statuses = (*eligible_statuses, "closed")
+            query = select(BrokerOrderORM).where(BrokerOrderORM.status.in_(eligible_statuses))
             if parent_client_order_id:
                 query = query.where(BrokerOrderORM.client_order_id == parent_client_order_id)
             else:
@@ -731,6 +740,8 @@ class AuditRepository:
                 return False
             order = orders[0]
             if order.candidate_id != candidate_id:
+                return False
+            if expected_quantity is not None and order.quantity != expected_quantity:
                 return False
             order.status = "closed"
             order.last_seen_at = now
