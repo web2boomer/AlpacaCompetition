@@ -442,20 +442,10 @@
       }
     };
 
-    const refresh = async () => {
+    const refreshHealth = async () => {
       try {
-        const [activityResponse, healthResponse, accountResponse, overnightResponse] = await Promise.all([
-          fetch("/api/activity", {cache: "no-store"}),
-          fetch("/api/health", {cache: "no-store"}),
-          fetch("/api/account", {cache: "no-store"}).catch(() => null),
-          marketSession === "market_hours"
-            ? Promise.resolve(null)
-            : fetch("/api/overnight-estimate", {cache: "no-store"}).catch(() => null)
-        ]);
-        if (!activityResponse.ok) throw new Error("activity unavailable");
-        const [payload, health] = await Promise.all([
-          activityResponse.json(), healthResponse.json()
-        ]);
+        const healthResponse = await fetch("/api/health", {cache: "no-store"});
+        const health = await healthResponse.json();
         renderMarketSession(health.market_session);
         const entryDisabled = health.kill_switch_active === true;
         const entryBadge = document.getElementById("entry-authority-badge");
@@ -464,6 +454,29 @@
           entryBadge.classList.toggle("danger", entryDisabled);
         }
         renderTradingAvailability(health);
+        connection.textContent = entryDisabled ? "Entry disabled" : health.status === "healthy" ? "Live" : "Degraded";
+        const healthy = health.status === "healthy";
+        architectureStatus.textContent = healthy ? "System responding" : "Attention required";
+        architectureLive.classList.toggle("degraded", !healthy);
+      } catch (_) {
+        connection.textContent = "Retrying";
+        architectureStatus.textContent = "Reconnecting";
+        architectureLive.classList.add("degraded");
+      }
+    };
+
+    const refresh = async () => {
+      const healthRefresh = refreshHealth();
+      try {
+        const [activityResponse, accountResponse, overnightResponse] = await Promise.all([
+          fetch("/api/activity", {cache: "no-store"}),
+          fetch("/api/account", {cache: "no-store"}).catch(() => null),
+          marketSession === "market_hours"
+            ? Promise.resolve(null)
+            : fetch("/api/overnight-estimate", {cache: "no-store"}).catch(() => null)
+        ]);
+        if (!activityResponse.ok) throw new Error("activity unavailable");
+        const payload = await activityResponse.json();
         let accountFresh = false;
         try {
           if (!accountResponse?.ok) throw new Error("account unavailable");
@@ -486,17 +499,11 @@
         }
         renderActivity(payload.entries);
         if (!accountFresh) setUpdated(payload.generated_at);
-        connection.textContent = entryDisabled ? "Entry disabled" : health.status === "healthy" ? "Live" : "Degraded";
-        const healthy = health.status === "healthy";
-        architectureStatus.textContent = healthy ? "System responding" : "Attention required";
-        architectureLive.classList.toggle("degraded", !healthy);
       } catch (_) {
-        connection.textContent = "Retrying";
         equitySourceState.textContent = "Latest audited";
         equitySourceState.dataset.state = "stale";
-        architectureStatus.textContent = "Reconnecting";
-        architectureLive.classList.add("degraded");
       }
+      await healthRefresh;
     };
 
     setUpdated(updated.dateTime);

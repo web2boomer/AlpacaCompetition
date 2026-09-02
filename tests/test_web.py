@@ -81,6 +81,10 @@ def test_dashboard_and_health(settings, database) -> None:
     assert "renderMarketSession(health.market_session)" in response.text
     assert 'id="trading-availability"' in response.text
     assert "renderTradingAvailability(health)" in response.text
+    assert "const refreshHealth = async () =>" in response.text
+    assert "const healthRefresh = refreshHealth();" in response.text
+    assert "await healthRefresh;" in response.text
+    assert response.text.count('fetch("/api/health", {cache: "no-store"})') == 1
     assert 'marketSession === "market_hours"' in response.text
     assert 'id="account-equity" data-baseline="100000" aria-live="polite"' in response.text
     assert 'id="account-equity-return"' in response.text
