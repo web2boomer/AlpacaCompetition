@@ -201,8 +201,9 @@ Boundary tests are required for one second before, exactly at, and one second af
 The regular market-hours loop runs every five minutes and increases to approximately once per minute
 from forced-liquidation start until Alpaca positions and relevant working orders confirm flat.
 
-For the September 2–3 recovery window, new production entries are considered only from 09:45 ET
-inclusive to 14:30 ET exclusive. New-entry auction input is limited to SPY/QQQ/IWM call and put
+For the September 2 recovery window, new production entries are considered only from 09:45 ET
+inclusive to 15:20 ET exclusive; Thursday retains the immutable 14:30 ET competition cutoff.
+New-entry auction input is limited to SPY/QQQ/IWM call and put
 debit spreads. Index condors continue to be compiled and persisted for Decision Passport and
 counterfactual evidence, but carry the explicit `competition_directional_only_policy` exclusion and
 cannot reach the model auction. This temporary policy does not alter lifecycle authority for an

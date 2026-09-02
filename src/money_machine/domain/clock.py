@@ -21,7 +21,7 @@ ScoringWindowState = Literal["pre_scoring", "scoring", "eod_measurement", "post_
 MarketSessionPhase = Literal["market_hours", "extended_hours", "overnight"]
 NEW_YORK = ZoneInfo("America/New_York")
 DAILY_ENTRY_START_TIME = time(9, 45)
-DAILY_ENTRY_CUTOFF_TIME = time(14, 30)
+DAILY_ENTRY_CUTOFF_TIME = time(15, 20)
 
 
 @dataclass(frozen=True, slots=True)

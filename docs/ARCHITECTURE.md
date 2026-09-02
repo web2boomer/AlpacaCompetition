@@ -69,7 +69,8 @@ directional-only for new entries. Condors remain in the complete candidate repor
 counterfactual analysis but are deterministically excluded before model selection. Directional
 spreads require two consecutive completed five-minute observations with the same direction and at
 least 0.40% absolute return from previous close; missing, reversed, weak, or stale history abstains.
-Production entry authority is additionally restricted to 09:45–14:30 ET. These selector controls do
+Production entry authority is additionally restricted to 09:45–15:20 ET, while Thursday retains
+the immutable 14:30 ET competition cutoff. These selector controls do
 not weaken reconciliation or lifecycle ownership of previously established structures.
 
 The daily-loss control is persistent and session-scoped. A raw 4.00% breach immediately

@@ -127,8 +127,11 @@ def test_market_session_phase(moment, phase) -> None:
     [
         (datetime(2026, 9, 2, 13, 44, 59, tzinfo=UTC), False),
         (datetime(2026, 9, 2, 13, 45, tzinfo=UTC), True),
-        (datetime(2026, 9, 2, 18, 29, 59, tzinfo=UTC), True),
-        (datetime(2026, 9, 2, 18, 30, tzinfo=UTC), False),
+        (datetime(2026, 9, 2, 18, 35, tzinfo=UTC), True),
+        (datetime(2026, 9, 2, 19, 15, tzinfo=UTC), True),
+        (datetime(2026, 9, 2, 19, 19, 59, tzinfo=UTC), True),
+        (datetime(2026, 9, 2, 19, 20, tzinfo=UTC), False),
+        (datetime(2026, 9, 2, 19, 50, tzinfo=UTC), False),
         (datetime(2026, 9, 5, 14, 0, tzinfo=UTC), False),
     ],
 )

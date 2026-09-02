@@ -829,6 +829,32 @@ async def test_fresh_pending_entry_is_canceled_at_cutoff_without_replacement(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("now", "expected_state"),
+    [
+        (datetime(2026, 9, 2, 18, 35, tzinfo=UTC), "full_execution"),
+        (datetime(2026, 9, 2, 19, 15, tzinfo=UTC), "full_execution"),
+        (datetime(2026, 9, 2, 19, 20, tzinfo=UTC), "observe_only"),
+        (datetime(2026, 9, 2, 19, 50, tzinfo=UTC), "observe_only"),
+    ],
+)
+async def test_production_daily_entry_authority_uses_session_safe_cutoff(
+    settings, repository, replay_adapter, monkeypatch, now, expected_state
+) -> None:
+    monkeypatch.setattr(repository, "has_managed_orders", lambda _role: True)
+    outcome = await AgentService(production_settings(settings), repository).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=now,
+        mode=RunMode.LIVE,
+    )
+
+    assert outcome.passport.get("status") != "failed_closed", outcome.passport
+    assert outcome.passport["operational_state"]["execution_state"] == expected_state
+    assert not outcome.order_submitted
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("broker_status", ["filled", "canceled", "expired", "rejected"])
 async def test_terminal_pending_close_is_refreshed_without_cancel_or_replacement(
     settings, repository, replay_adapter, monkeypatch, broker_status

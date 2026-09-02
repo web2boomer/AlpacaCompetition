@@ -180,10 +180,14 @@ def test_daily_hard_boundary_is_urgent_and_prevents_overnight_roll(replay_candid
 
 def test_entry_holding_policy_clamps_and_rejects_too_late() -> None:
     accepted = entry_holding_policy(datetime(2026, 9, 1, 18, 0, tzinfo=UTC), 360)
+    last_accepted_cycle = entry_holding_policy(datetime(2026, 9, 2, 19, 20, tzinfo=UTC), 60)
     rejected = entry_holding_policy(datetime(2026, 9, 1, 19, 21, tzinfo=UTC), 60)
     assert accepted.accepted
     assert accepted.effective_deadline == datetime(2026, 9, 1, 19, 50, tzinfo=UTC)
     assert accepted.reason == "daily_boundary"
+    assert last_accepted_cycle.accepted
+    assert last_accepted_cycle.effective_holding_minutes == 30
+    assert last_accepted_cycle.effective_deadline == datetime(2026, 9, 2, 19, 50, tzinfo=UTC)
     assert not rejected.accepted
     assert rejected.reason == "insufficient_tradable_session_window"
 
