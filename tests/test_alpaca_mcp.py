@@ -98,6 +98,42 @@ async def test_targeted_snapshot_helpers_use_bounded_symbol_requests() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_stock_recovery_order_is_bounded_ioc_sell() -> None:
+    adapter = AlpacaMcpV2Adapter(Settings())
+    adapter.call_tool = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "id": "broker-recovery",
+            "client_order_id": "mm-comp-ar-20260902-qqq",
+            "status": "accepted",
+            "submitted_at": "2026-09-02T13:30:01Z",
+        }
+    )
+
+    result = await adapter.place_stock_order(
+        symbol="QQQ",
+        quantity=100,
+        limit_price=Decimal("706.90"),
+        client_order_id="mm-comp-ar-20260902-qqq",
+    )
+
+    assert result.broker_order_id == "broker-recovery"
+    assert adapter.call_tool.await_args.args == (
+        "place_stock_order",
+        {
+            "symbol": "QQQ",
+            "side": "sell",
+            "qty": "100",
+            "type": "limit",
+            "time_in_force": "ioc",
+            "limit_price": "706.90",
+            "extended_hours": False,
+            "client_order_id": "mm-comp-ar-20260902-qqq",
+            "order_class": "simple",
+        },
+    )
+
+
 def _option_snapshot(
     *, bid: str, ask: str, bid_size: int, ask_size: int, volume: int
 ) -> dict[str, object]:

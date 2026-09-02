@@ -436,6 +436,81 @@ class AuditRepository:
                         )
                     )
 
+    def persist_assignment_recovery_intent(
+        self,
+        run_id: str,
+        *,
+        symbol: str,
+        quantity: int,
+        client_order_id: str,
+        limit_price: Decimal,
+        lineage: dict[str, str],
+        observed_at: datetime,
+    ) -> None:
+        """Persist an immutable reduce-to-flat intent before broker submission."""
+        with self.database.session() as session:
+            session.add(
+                BrokerOrderORM(
+                    agent_run_id=run_id,
+                    candidate_id=f"assignment-recovery:{symbol}",
+                    client_order_id=client_order_id,
+                    broker_order_id=None,
+                    status="recovery_intent_recorded",
+                    quantity=quantity,
+                    limit_price=limit_price,
+                    environment_role="competition",
+                    attempt=0,
+                    submitted_at=None,
+                    last_seen_at=observed_at,
+                    raw_json={
+                        "request": {
+                            "authority": "assignment_recovery_reduce_to_flat",
+                            "symbol": symbol,
+                            "side": "sell",
+                            "quantity": quantity,
+                            "order_type": "limit",
+                            "time_in_force": "ioc",
+                            "extended_hours": False,
+                            "lineage": lineage,
+                        }
+                    },
+                )
+            )
+
+    def update_assignment_recovery_order(
+        self,
+        client_order_id: str,
+        *,
+        broker_order_id: str,
+        status: str,
+        observed_at: datetime,
+        broker_payload: dict[str, Any],
+    ) -> None:
+        """Attach redacted broker truth to a previously persisted recovery intent."""
+        with self.database.session() as session:
+            row = session.scalar(
+                select(BrokerOrderORM).where(BrokerOrderORM.client_order_id == client_order_id)
+            )
+            if row is None or row.status not in {
+                "recovery_intent_recorded",
+                "accepted",
+                "accepted_for_bidding",
+                "calculated",
+                "held",
+                "new",
+                "pending_new",
+                "submitted",
+                "partially_filled",
+            }:
+                raise RuntimeError("assignment recovery order is not updateable")
+            row.broker_order_id = broker_order_id
+            row.status = status
+            row.submitted_at = row.submitted_at or observed_at
+            row.last_seen_at = observed_at
+            raw_json = dict(row.raw_json)
+            raw_json["broker"] = broker_payload
+            row.raw_json = raw_json
+
     def persist_fills(self, activities: list[dict[str, Any]]) -> None:
         """Append broker fill activities idempotently and advance known order state."""
         with self.database.session() as session:

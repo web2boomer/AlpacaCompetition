@@ -12,6 +12,7 @@ from alembic.config import Config
 from money_machine.acceptance import run_production_acceptance
 from money_machine.adapters.alpaca_mcp import AlpacaMcpV2Adapter
 from money_machine.adapters.replay import ReplayAlpacaAdapter
+from money_machine.assignment_recovery import guarded_assignment_recovery
 from money_machine.business_reporting import BusinessReportBuilder, BusinessReportingOrchestrator
 from money_machine.development_acceptance import run_development_round_trip
 from money_machine.domain.clock import EOD_EQUITY_SNAPSHOT_AT
@@ -64,6 +65,11 @@ def main() -> None:
     kill = subparsers.add_parser("kill-switch", help="set the persistent entry kill switch")
     kill.add_argument("state", choices=["on", "off", "status"])
     kill.add_argument("--confirm-production-clear", action="store_true")
+    recovery = subparsers.add_parser(
+        "assignment-recovery",
+        help="guarded one-off flatten of the exact Sep 2 stock assignments",
+    )
+    recovery.add_argument("--confirm-assignment-recovery", action="store_true")
     args = parser.parse_args()
     if args.env_file:
         load_local_environment(args.env_file)
@@ -134,6 +140,11 @@ def main() -> None:
         else:
             repository.set_kill_switch(active=True, now=datetime.now(UTC))
             _print_json({"kill_switch": args.state, "persistent": True})
+    elif args.command == "assignment-recovery":
+        if not args.confirm_assignment_recovery:
+            raise SystemExit("assignment recovery requires --confirm-assignment-recovery")
+        _migration("upgrade", settings.database_url)
+        _print_json(asyncio.run(guarded_assignment_recovery(settings, repository)))
 
 
 async def _replay(settings: Settings, repository: AuditRepository) -> dict[str, Any]:

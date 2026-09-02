@@ -283,6 +283,39 @@ class AlpacaMcpV2Adapter:
             raw=_redacted_order_payload(payload),
         )
 
+    async def place_stock_order(
+        self,
+        *,
+        symbol: str,
+        quantity: int,
+        limit_price: Decimal,
+        client_order_id: str,
+    ) -> BrokerOrderResult:
+        """Submit one bounded, idempotent regular-session stock sell."""
+        payload = _as_dict(
+            await self.call_tool(
+                "place_stock_order",
+                {
+                    "symbol": symbol,
+                    "side": "sell",
+                    "qty": str(quantity),
+                    "type": "limit",
+                    "time_in_force": "ioc",
+                    "limit_price": str(limit_price),
+                    "extended_hours": False,
+                    "client_order_id": client_order_id,
+                    "order_class": "simple",
+                },
+            )
+        )
+        return BrokerOrderResult(
+            broker_order_id=str(payload.get("id") or ""),
+            client_order_id=str(payload.get("client_order_id") or client_order_id),
+            status=str(payload.get("status") or "submitted"),
+            submitted_at=_parse_time(payload.get("submitted_at") or datetime.now(UTC)),
+            raw=_redacted_order_payload(payload),
+        )
+
     async def cancel_order(self, broker_order_id: str) -> None:
         await self.call_tool("cancel_order_by_id", {"order_id": broker_order_id})
 
