@@ -28,6 +28,7 @@ from money_machine.persistence.models import (
 from money_machine.persistence.repository import DirectionalStopRecord, PriorMarketObservation
 from money_machine.safety import configured_account_fingerprint
 from money_machine.service import (
+    FINAL_DAY_PROFIT_TARGET_EQUITY,
     AgentService,
     _directional_policy_exclusions,
     _entry_take_profit_multiple,
@@ -1907,6 +1908,148 @@ def account_at(equity: str) -> AccountSnapshot:
         cash=Decimal(equity),
         buying_power=Decimal(equity) * 2,
         portfolio_value=Decimal(equity),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("now", "equity", "reached", "expected_execution_state"),
+    [
+        (datetime(2026, 9, 3, 18, 10, tzinfo=UTC), "103999.99", False, "full_execution"),
+        (datetime(2026, 9, 3, 18, 10, tzinfo=UTC), "104000.00", True, "close_only"),
+        (datetime(2026, 9, 2, 18, 10, tzinfo=UTC), "104000.00", False, "full_execution"),
+    ],
+)
+async def test_final_day_profit_target_boundary_is_exact_and_date_bounded(
+    settings,
+    repository,
+    replay_adapter,
+    monkeypatch,
+    now,
+    equity,
+    reached,
+    expected_execution_state,
+) -> None:
+    assert Decimal("104000") == FINAL_DAY_PROFIT_TARGET_EQUITY
+    replay_adapter.data["account"].update(equity=equity, portfolio_value=equity)
+    for chain in replay_adapter.data["chains"].values():
+        chain.clear()
+    monkeypatch.setattr(repository, "has_managed_orders", lambda _role: True)
+
+    outcome = await AgentService(production_settings(settings), repository).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=now,
+        mode=RunMode.LIVE,
+    )
+
+    assert outcome.passport["profit_target_control"]["reached"] is reached
+    assert outcome.passport["operational_state"]["execution_state"] == expected_execution_state
+    assert not outcome.order_submitted
+
+
+@pytest.mark.asyncio
+async def test_final_day_profit_target_latches_from_clean_official_peak(
+    settings, repository, replay_adapter, monkeypatch
+) -> None:
+    now = datetime(2026, 9, 3, 18, 10, tzinfo=UTC)
+    for chain in replay_adapter.data["chains"].values():
+        chain.clear()
+    monkeypatch.setattr(repository, "has_managed_orders", lambda _role: True)
+    replay_adapter.data["account"].update(equity="104000", portfolio_value="104000")
+    reached = await AgentService(production_settings(settings), repository).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=now,
+        mode=RunMode.LIVE,
+    )
+    assert reached.passport["profit_target_control"]["reached"] is True
+
+    replay_adapter.data["account"].update(equity="103000", portfolio_value="103000")
+    latched = await AgentService(production_settings(settings), repository).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=now + timedelta(minutes=5),
+        mode=RunMode.LIVE,
+    )
+
+    control = latched.passport["profit_target_control"]
+    assert control["reached"] is True
+    assert control["latched_peak_equity"] == "104000.00"
+    assert control["observed_equity"] == "103000"
+    assert control["equity_source"] == "persisted_clean_official_peak_equity"
+    assert control["expires_at"] == EOD_EQUITY_SNAPSHOT_AT.isoformat()
+    assert latched.passport["operational_state"]["execution_state"] == "close_only"
+
+
+@pytest.mark.asyncio
+async def test_final_day_profit_target_cancels_pending_entry_without_replacement(
+    settings, repository, replay_adapter, monkeypatch
+) -> None:
+    first = await AgentService(settings, repository).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at,
+        mode=RunMode.REPLAY,
+    )
+    now = datetime(2026, 9, 3, 18, 10, tzinfo=UTC)
+    with repository.database.session() as session:
+        order = session.scalar(
+            select(BrokerOrderORM).where(BrokerOrderORM.agent_run_id == first.run_id)
+        )
+        assert order is not None
+        order.status = "pending_new"
+        order.environment_role = "competition"
+        order.submitted_at = now - timedelta(minutes=1)
+    replay_adapter.data["account"].update(equity="104000", portfolio_value="104000")
+
+    async def pending_order(_broker_order_id: str):
+        return {"status": "pending_new"}
+
+    monkeypatch.setattr(replay_adapter, "order_by_id", pending_order)
+    request_count = len(replay_adapter.submitted_requests)
+    outcome = await AgentService(production_settings(settings), repository).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=now,
+        mode=RunMode.LIVE,
+    )
+
+    assert replay_adapter.canceled_order_ids
+    assert len(replay_adapter.submitted_requests) == request_count
+    assert outcome.passport["profit_target_control"]["reached"] is True
+    assert any(
+        event["event"] == "entry_order_canceled_at_cutoff"
+        for event in outcome.passport["operational_state"]["lifecycle_events"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_final_day_profit_target_atomically_closes_open_structure(
+    settings, repository, replay_adapter
+) -> None:
+    await seed_managed_position(settings, repository, replay_adapter)
+    now = datetime(2026, 9, 3, 18, 10, tzinfo=UTC)
+    replay_adapter.data["account"].update(equity="104000", portfolio_value="104000")
+    for chain in replay_adapter.data["chains"].values():
+        for quote in chain:
+            quote["observed_at"] = now.isoformat()
+    before = len(replay_adapter.submitted_requests)
+
+    outcome = await AgentService(production_settings(settings), repository).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=now,
+        mode=RunMode.LIVE,
+    )
+
+    assert len(replay_adapter.submitted_requests) == before + 1
+    close_request = replay_adapter.submitted_requests[-1]
+    assert close_request.is_closing
+    assert all(leg.position_intent.value.endswith("_to_close") for leg in close_request.legs)
+    assert any(
+        event.get("reason") == "competition_profit_target_reached"
+        for event in outcome.passport["operational_state"]["lifecycle_events"]
     )
 
 

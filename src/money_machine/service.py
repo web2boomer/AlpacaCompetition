@@ -9,6 +9,7 @@ from money_machine.adapters.replay import infer_atm_implied_move
 from money_machine.domain.candidates import CandidateBuildReport, build_candidates
 from money_machine.domain.clock import (
     BASELINE_EQUITY,
+    EOD_EQUITY_SNAPSHOT_AT,
     FORCED_FLATTEN_STARTS_AT,
     CompetitionClockSnapshot,
     competition_clock,
@@ -68,6 +69,7 @@ DIRECTION_CONFIRMATION_MIN_GAP = timedelta(minutes=5)
 DIRECTION_CONFIRMATION_MAX_GAP = timedelta(minutes=10)
 STRATEGY_ROTATION_INTERVAL = timedelta(minutes=45)
 MEANINGFUL_PROGRESS_MULTIPLE = Decimal("1.05")
+FINAL_DAY_PROFIT_TARGET_EQUITY = Decimal("104000")
 MAVERICK_MIN_TREND_ACCELERATION = Decimal("0.001")
 
 
@@ -178,6 +180,31 @@ class AgentService:
                 not market_open or (production_account and not competition_entry_window_open(now))
             ):
                 execution_state = ExecutionState.OBSERVE_ONLY
+
+            profit_target_reached = bool(
+                production_account
+                and official
+                and reconciliation_clean
+                and is_final_competition_day(now)
+                and now <= EOD_EQUITY_SNAPSHOT_AT
+                and peak_equity >= FINAL_DAY_PROFIT_TARGET_EQUITY
+            )
+            profit_target_control = {
+                "target_equity": str(FINAL_DAY_PROFIT_TARGET_EQUITY),
+                "reached": profit_target_reached,
+                "latched_peak_equity": str(peak_equity),
+                "observed_equity": str(account.equity),
+                "equity_source": (
+                    "current_verified_official_account_equity"
+                    if profit_target_reached and account.equity >= FINAL_DAY_PROFIT_TARGET_EQUITY
+                    else "persisted_clean_official_peak_equity"
+                    if profit_target_reached
+                    else "verified_official_account_below_target"
+                ),
+                "expires_at": EOD_EQUITY_SNAPSHOT_AT.isoformat(),
+            }
+            if profit_target_reached and execution_state is ExecutionState.FULL_EXECUTION:
+                execution_state = ExecutionState.CLOSE_ONLY
 
             snapshots_raw, chains_raw = await asyncio.gather(
                 asyncio.gather(*(adapter.underlying_snapshot(symbol) for symbol in UNIVERSE)),
@@ -329,7 +356,10 @@ class AgentService:
             safety_equity = min(raw_account.equity, account.equity)
             drawdown = max(Decimal("0"), peak_equity - safety_equity)
             final_day_portfolio_loss_override = is_final_competition_day(now)
-            if final_day_portfolio_loss_override:
+            portfolio_exit_reason: str | None
+            if profit_target_reached:
+                portfolio_exit_reason = "competition_profit_target_reached"
+            elif final_day_portfolio_loss_override:
                 portfolio_exit_reason = (
                     "reconciliation_safety_incident"
                     if not reconciliation_clean and raw_daily_loss >= daily_limit
@@ -600,6 +630,7 @@ class AgentService:
                 portfolio_candidate_exclusions=portfolio_candidate_exclusions,
                 directional_confirmation=directional_confirmation,
                 daily_loss_control=daily_loss_evidence,
+                profit_target_control=profit_target_control,
                 strategy_rotation=rotation,
             )
             self.repository.complete_run(run_id, completed_at=now, passport=passport)
@@ -1054,6 +1085,7 @@ def _passport(
     portfolio_candidate_exclusions: dict[str, tuple[str, ...]],
     directional_confirmation: dict[str, dict[str, Any]],
     daily_loss_control: dict[str, Any],
+    profit_target_control: dict[str, Any],
     strategy_rotation: dict[str, Any],
 ) -> dict[str, Any]:
     candidates = [candidate.model_dump(mode="json") for candidate in report.candidates]
@@ -1095,6 +1127,7 @@ def _passport(
             "lifecycle_events": list(lifecycle_events),
         },
         "daily_loss_control": daily_loss_control,
+        "profit_target_control": profit_target_control,
         "strategy_rotation": strategy_rotation,
         "evidence": [_snapshot_features(snapshot) for snapshot in snapshots],
         "candidate_rejections": report.rejections,

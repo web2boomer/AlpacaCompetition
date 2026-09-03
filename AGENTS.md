@@ -48,6 +48,13 @@ one additional independently validated atomic defined-risk structure may be adde
 SPY/QQQ/IWM underlying. Every Thursday directional debit spread uses a 2.10-times opening-debit
 take-profit, a 0.65-times premium-value stop, and a 45-minute maximum hold.
 
+The authoritative final-day profit target is $104,000 of verified official-account equity. On
+2026-09-03 only, the first clean official mark at or above that target latches through the 16:00 ET
+equity lock: new entries stop, pending entries cancel through normal lifecycle, and open structures
+close atomically through the normal exit path. The Passport must identify the current verified mark
+or persisted clean official peak that activated the latch. This target lock cannot activate from an
+unreconciled mark and does not apply on another date.
+
 This authorization never weakens the official-account and paper-only guards, atomic defined-risk
 MLEG requirement, deterministic caps, reconciliation, liquidity, data, event, lifecycle,
 idempotency, the one-additional-structure ceiling, 14:30 entry cutoff, 15:15 forced flatten, 15:45

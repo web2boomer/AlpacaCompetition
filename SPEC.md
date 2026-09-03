@@ -397,6 +397,12 @@ Competition limits:
   breached. Reconciliation-safety exits, per-structure 0.65 premium-value stops, 2.10 targets,
   45-minute maximum holds, and the forced-flatten schedule remain active. This override expires
   at the official equity lock and does not alter other sessions.
+- The final-day profit lock is $104,000 of verified official-account equity. The first clean mark at
+  or above the target latches through the 16:00 ET equity lock using the persisted clean official
+  peak: no new entry is permitted, pending entries cancel without replacement through normal
+  lifecycle, and established structures close atomically through the normal exit path. The trigger,
+  current equity, latched peak, source, and expiry are recorded in every Decision Passport. It is
+  date-bounded to 2026-09-03 and cannot activate from an unreconciled mark.
 - On Thursday only, one fresh high-conviction SPY/QQQ/IWM directional debit spread may use up to
   12% of current equity, never exceeding the existing 12% index-cluster cap and only while the
   cluster is flat. It requires every normal hard gate plus at least 0.10 percentage point of
