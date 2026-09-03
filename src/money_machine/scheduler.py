@@ -8,7 +8,11 @@ from uuid import uuid4
 import structlog
 
 from money_machine.adapters.alpaca_mcp import AlpacaMcpV2Adapter
-from money_machine.domain.clock import FORCED_FLATTEN_STARTS_AT
+from money_machine.domain.clock import (
+    EOD_EQUITY_SNAPSHOT_AT,
+    FINAL_HOUR_RECOVERY_STARTS_AT,
+    FORCED_FLATTEN_STARTS_AT,
+)
 from money_machine.domain.enums import RunMode
 from money_machine.model_provider import DeterministicModelProvider, OpenAIModelProvider
 from money_machine.persistence.repository import AuditRepository
@@ -89,4 +93,5 @@ def scheduler_interval_seconds(now: datetime, *, broker_confirmed_flat: bool) ->
     liquidation_recovery = (
         now.astimezone(UTC) >= FORCED_FLATTEN_STARTS_AT and not broker_confirmed_flat
     )
-    return 60 if liquidation_recovery else 300
+    final_window = FINAL_HOUR_RECOVERY_STARTS_AT <= now.astimezone(UTC) <= EOD_EQUITY_SNAPSHOT_AT
+    return 60 if final_window or liquidation_recovery else 300

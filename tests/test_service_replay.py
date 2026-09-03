@@ -33,6 +33,7 @@ from money_machine.service import (
     _directional_policy_exclusions,
     _entry_take_profit_multiple,
     _portfolio_candidate_exclusions,
+    _repeated_snapshot_exclusions,
 )
 from money_machine.settings import Settings
 
@@ -598,7 +599,7 @@ async def test_rotation_excludes_stagnant_setup_and_selects_alternative_underlyi
 async def test_debit_stop_requires_fresh_two_cycle_reconfirmation(
     repository, replay_adapter, directional_candidate, monkeypatch
 ) -> None:
-    now = replay_adapter.observed_at
+    now = datetime(2026, 9, 3, 19, 40, tzinfo=UTC)
     current = await replay_adapter.underlying_snapshot(directional_candidate.structure.underlying)
     current = current.model_copy(update={"observed_at": now})
     prior_snapshot = current.model_copy(update={"observed_at": now - timedelta(minutes=20)})
@@ -633,9 +634,9 @@ async def test_debit_stop_requires_fresh_two_cycle_reconfirmation(
     ]
 
     fresh_prior = PriorMarketObservation(
-        cycle_at=now - timedelta(minutes=5),
-        observed_at=now - timedelta(minutes=5),
-        snapshot=current.model_copy(update={"observed_at": now - timedelta(minutes=5)}),
+        cycle_at=now - timedelta(minutes=1),
+        observed_at=now - timedelta(minutes=1),
+        snapshot=current.model_copy(update={"observed_at": now - timedelta(minutes=1)}),
     )
     monkeypatch.setattr(repository, "prior_market_observation", lambda **_kwargs: fresh_prior)
     allowed, refreshed = _directional_policy_exclusions(
@@ -674,6 +675,24 @@ async def test_debit_stop_requires_fresh_two_cycle_reconfirmation(
         now=now,
     )
     assert opposite.candidate_id not in opposite_exclusions
+
+
+def test_repeated_identical_submitted_snapshot_is_excluded(directional_candidate) -> None:
+    previous = {
+        "execution": {"submitted": True},
+        "decision": {"candidate_id": directional_candidate.candidate_id},
+        "candidates": [directional_candidate.model_dump(mode="json")],
+    }
+
+    excluded = _repeated_snapshot_exclusions((directional_candidate,), previous_passport=previous)
+    assert excluded[directional_candidate.candidate_id] == (
+        "repeated_identical_snapshot_after_submission",
+    )
+
+    changed = directional_candidate.model_copy(
+        update={"score": directional_candidate.score + Decimal("0.01")}
+    )
+    assert not _repeated_snapshot_exclusions((changed,), previous_passport=previous)
 
 
 @pytest.mark.asyncio

@@ -198,8 +198,9 @@ Boundary tests are required for one second before, exactly at, and one second af
 
 ## 7. Autonomous agent loop
 
-The regular market-hours loop runs every five minutes and increases to approximately once per minute
-from forced-liquidation start until Alpaca positions and relevant working orders confirm flat.
+The regular market-hours loop runs every five minutes. On 2026-09-03 only, it runs every minute
+from the final-hour recovery start through the 16:00 ET equity lock; liquidation recovery also runs
+approximately once per minute until Alpaca positions and relevant working orders confirm flat.
 
 For the September 2 recovery window, new production entries are considered only from 09:45 ET
 inclusive to 15:20 ET exclusive. The 2026-09-03 final-hour mandate supersedes Thursday's earlier

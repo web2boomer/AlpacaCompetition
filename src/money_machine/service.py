@@ -69,6 +69,8 @@ from money_machine.settings import Settings
 UNIVERSE = ("SPY", "QQQ", "IWM")
 DIRECTION_CONFIRMATION_MIN_GAP = timedelta(minutes=5)
 DIRECTION_CONFIRMATION_MAX_GAP = timedelta(minutes=10)
+FINAL_WINDOW_CONFIRMATION_MIN_GAP = timedelta(minutes=1)
+FINAL_WINDOW_CONFIRMATION_MAX_GAP = timedelta(minutes=2)
 STRATEGY_ROTATION_INTERVAL = timedelta(minutes=45)
 MEANINGFUL_PROGRESS_MULTIPLE = Decimal("1.05")
 FINAL_DAY_PROFIT_TARGET_EQUITY = Decimal("104000")
@@ -467,6 +469,13 @@ class AgentService:
                 rotation=rotation,
             )
             for candidate_id, reasons in rotation_exclusions.items():
+                portfolio_candidate_exclusions[candidate_id] = tuple(
+                    dict.fromkeys((*portfolio_candidate_exclusions.get(candidate_id, ()), *reasons))
+                )
+            repeated_snapshot_exclusions = _repeated_snapshot_exclusions(
+                report.candidates, previous_passport=previous_passport
+            )
+            for candidate_id, reasons in repeated_snapshot_exclusions.items():
                 portfolio_candidate_exclusions[candidate_id] = tuple(
                     dict.fromkeys((*portfolio_candidate_exclusions.get(candidate_id, ()), *reasons))
                 )
@@ -1353,6 +1362,44 @@ def _strategy_rotation_exclusions(
     }
 
 
+def _repeated_snapshot_exclusions(
+    candidates: tuple[Candidate, ...], *, previous_passport: dict[str, Any]
+) -> dict[str, tuple[str, ...]]:
+    execution = previous_passport.get("execution", {})
+    decision = previous_passport.get("decision", {})
+    if not isinstance(execution, dict) or not execution.get("submitted"):
+        return {}
+    if not isinstance(decision, dict) or not decision.get("candidate_id"):
+        return {}
+    selected_id = str(decision["candidate_id"])
+    previous_candidates = previous_passport.get("candidates", [])
+    previous = next(
+        (
+            item
+            for item in previous_candidates
+            if isinstance(item, dict) and item.get("candidate_id") == selected_id
+        ),
+        None,
+    )
+    if previous is None:
+        return {}
+    previous_signature = _candidate_market_signature(previous)
+    return {
+        candidate.candidate_id: ("repeated_identical_snapshot_after_submission",)
+        for candidate in candidates
+        if candidate.candidate_id == selected_id
+        and _candidate_market_signature(candidate.model_dump(mode="json")) == previous_signature
+    }
+
+
+def _candidate_market_signature(candidate: dict[str, Any]) -> dict[str, Any]:
+    signature = dict(candidate)
+    signature.pop("data_age_seconds", None)
+    signature.pop("maximum_holding_minutes", None)
+    signature.pop("holding_deadline", None)
+    return signature
+
+
 def _strategy_rotation_after_selection(
     rotation: dict[str, Any], *, selected: Candidate | None, entry_submitted: bool
 ) -> dict[str, Any]:
@@ -1559,10 +1606,17 @@ def _directional_confirmation_reason(
         return "directional_confirmation_malformed_history"
     if abs(current.trend_return_pct) < Decimal("0.004"):
         return "directional_confirmation_current_below_threshold"
-    current_bucket = _normal_cycle_bucket(now)
-    prior_bucket = _normal_cycle_bucket(prior.cycle_at)
+    final_window = FINAL_HOUR_RECOVERY_STARTS_AT <= now <= EOD_EQUITY_SNAPSHOT_AT
+    current_bucket = _normal_cycle_bucket(now, one_minute=final_window)
+    prior_bucket = _normal_cycle_bucket(prior.cycle_at, one_minute=final_window)
     gap = current_bucket - prior_bucket
-    if gap < DIRECTION_CONFIRMATION_MIN_GAP or gap > DIRECTION_CONFIRMATION_MAX_GAP:
+    minimum_gap = (
+        FINAL_WINDOW_CONFIRMATION_MIN_GAP if final_window else DIRECTION_CONFIRMATION_MIN_GAP
+    )
+    maximum_gap = (
+        FINAL_WINDOW_CONFIRMATION_MAX_GAP if final_window else DIRECTION_CONFIRMATION_MAX_GAP
+    )
+    if gap < minimum_gap or gap > maximum_gap:
         return "directional_confirmation_stale_or_nonconsecutive"
     previous_trend = prior.snapshot.trend_return_pct
     current_trend = current.trend_return_pct
@@ -1573,7 +1627,9 @@ def _directional_confirmation_reason(
     return None
 
 
-def _normal_cycle_bucket(at: datetime) -> datetime:
+def _normal_cycle_bucket(at: datetime, *, one_minute: bool = False) -> datetime:
+    if one_minute:
+        return at.astimezone(UTC).replace(second=0, microsecond=0)
     minute = at.minute - at.minute % 5
     return at.astimezone(UTC).replace(minute=minute, second=0, microsecond=0)
 
