@@ -1322,7 +1322,7 @@ async def test_fresh_pending_entry_is_canceled_at_cutoff_without_replacement(
     outcome = await AgentService(production_settings(settings), repository).run_cycle(
         adapter=replay_adapter,
         model=ReplayModelProvider(),
-        now=NEW_ENTRY_CUTOFF,
+        now=NEW_ENTRY_CUTOFF + timedelta(seconds=1),
         mode=RunMode.LIVE,
     )
 

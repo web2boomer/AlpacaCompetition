@@ -21,8 +21,7 @@ from money_machine.domain.enums import ExecutionState
     ("boundary", "before_state", "at_state"),
     [
         (SCORING_STARTS_AT, ExecutionState.OBSERVE_ONLY, ExecutionState.FULL_EXECUTION),
-        (NEW_ENTRY_CUTOFF, ExecutionState.FULL_EXECUTION, ExecutionState.CLOSE_ONLY),
-        (FORCED_FLATTEN_STARTS_AT, ExecutionState.FULL_EXECUTION, ExecutionState.CLOSE_ONLY),
+        (FORCED_FLATTEN_STARTS_AT, ExecutionState.CLOSE_ONLY, ExecutionState.CLOSE_ONLY),
         (FLAT_TARGET_AT, ExecutionState.CLOSE_ONLY, ExecutionState.CLOSE_ONLY),
         (EOD_EQUITY_SNAPSHOT_AT, ExecutionState.CLOSE_ONLY, ExecutionState.CLOSE_ONLY),
         (ENDS_AT, ExecutionState.CLOSE_ONLY, ExecutionState.DISABLED),
@@ -39,6 +38,21 @@ def test_state_one_second_before_at_and_after_each_transition(
     assert after.state is at_state
 
 
+def test_final_hour_entry_cutoff_includes_exact_1520_boundary() -> None:
+    assert (
+        competition_clock(NEW_ENTRY_CUTOFF - timedelta(seconds=1), has_exposure=False).state
+        is ExecutionState.FULL_EXECUTION
+    )
+    assert (
+        competition_clock(NEW_ENTRY_CUTOFF, has_exposure=False).state
+        is ExecutionState.FULL_EXECUTION
+    )
+    assert (
+        competition_clock(NEW_ENTRY_CUTOFF + timedelta(seconds=1), has_exposure=False).state
+        is ExecutionState.CLOSE_ONLY
+    )
+
+
 @pytest.mark.parametrize(
     ("moment", "entries", "force_flatten", "flat_target", "eod", "window"),
     [
@@ -46,9 +60,9 @@ def test_state_one_second_before_at_and_after_each_transition(
         (SCORING_STARTS_AT, True, False, False, False, "scoring"),
         (SCORING_STARTS_AT + timedelta(seconds=1), True, False, False, False, "scoring"),
         (NEW_ENTRY_CUTOFF - timedelta(seconds=1), True, False, False, False, "scoring"),
-        (NEW_ENTRY_CUTOFF, False, True, False, False, "scoring"),
-        (NEW_ENTRY_CUTOFF + timedelta(seconds=1), False, True, False, False, "scoring"),
-        (FORCED_FLATTEN_STARTS_AT - timedelta(seconds=1), True, False, False, False, "scoring"),
+        (NEW_ENTRY_CUTOFF, True, False, False, False, "scoring"),
+        (NEW_ENTRY_CUTOFF + timedelta(seconds=1), False, False, False, False, "scoring"),
+        (FORCED_FLATTEN_STARTS_AT - timedelta(seconds=1), False, False, False, False, "scoring"),
         (FORCED_FLATTEN_STARTS_AT, False, True, False, False, "scoring"),
         (FORCED_FLATTEN_STARTS_AT + timedelta(seconds=1), False, True, False, False, "scoring"),
         (FLAT_TARGET_AT - timedelta(seconds=1), False, True, False, False, "scoring"),
@@ -131,6 +145,7 @@ def test_market_session_phase(moment, phase) -> None:
         (datetime(2026, 9, 2, 19, 15, tzinfo=UTC), True),
         (datetime(2026, 9, 2, 19, 19, 59, tzinfo=UTC), True),
         (datetime(2026, 9, 2, 19, 20, tzinfo=UTC), False),
+        (datetime(2026, 9, 3, 19, 20, tzinfo=UTC), True),
         (datetime(2026, 9, 2, 19, 50, tzinfo=UTC), False),
         (datetime(2026, 9, 5, 14, 0, tzinfo=UTC), False),
     ],

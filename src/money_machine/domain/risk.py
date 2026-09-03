@@ -1,8 +1,13 @@
 from datetime import datetime
 from decimal import ROUND_FLOOR, Decimal
 
-from money_machine.domain.clock import EOD_EQUITY_SNAPSHOT_AT, NEW_YORK
-from money_machine.domain.enums import Action, ExecutionState, RiskReason
+from money_machine.domain.clock import (
+    EOD_EQUITY_SNAPSHOT_AT,
+    FINAL_HOUR_RECOVERY_STARTS_AT,
+    NEW_ENTRY_CUTOFF,
+    NEW_YORK,
+)
+from money_machine.domain.enums import Action, ExecutionState, RiskReason, Side
 from money_machine.domain.options import validate_defined_risk
 from money_machine.domain.schemas import (
     Candidate,
@@ -196,6 +201,70 @@ def evaluate_risk(
         and candidate.structure.underlying in INDEX_UNDERLYINGS
         and open_underlying_count == 1
     )
+    index_strategy = (
+        candidate.action in INDEX_ACTIONS and candidate.structure.underlying in INDEX_UNDERLYINGS
+    )
+    confidence = Decimal(str(decision.confidence))
+    reward_risk_ratio = (
+        candidate.payoff_quality_ratio
+        if candidate.action is Action.INDEX_CONDOR and candidate.payoff_quality_ratio is not None
+        else candidate.structure.maximum_profit / candidate.structure.maximum_loss
+    )
+    spread_width = _spread_width(candidate)
+    debit_to_width_ratio = (
+        candidate.structure.net_price / spread_width
+        if candidate.action in DIRECTIONAL_INDEX_ACTIONS and spread_width > 0
+        else None
+    )
+    condor_tier_thresholds_met = (
+        index_strategy
+        and candidate.action is Action.INDEX_CONDOR
+        and confidence >= HIGH_CONVICTION_MIN_CONFIDENCE
+        and candidate.richness_ratio >= HIGH_CONVICTION_MIN_RICHNESS_RATIO
+        and reward_risk_ratio >= HIGH_CONVICTION_MIN_CONDOR_REWARD_RISK_RATIO
+    )
+    directional_tier_thresholds_met = (
+        index_strategy
+        and candidate.action in DIRECTIONAL_INDEX_ACTIONS
+        and confidence >= HIGH_CONVICTION_MIN_CONFIDENCE
+        and candidate.trend_strength is not None
+        and candidate.trend_strength >= HIGH_CONVICTION_MIN_DIRECTIONAL_TREND_STRENGTH
+        and reward_risk_ratio >= HIGH_CONVICTION_MIN_DIRECTIONAL_REWARD_RISK_RATIO
+        and debit_to_width_ratio is not None
+        and debit_to_width_ratio <= HIGH_CONVICTION_MAX_DEBIT_TO_WIDTH_RATIO
+    )
+    tier_thresholds_met = condor_tier_thresholds_met or directional_tier_thresholds_met
+    final_hour_window = FINAL_HOUR_RECOVERY_STARTS_AT <= context.now <= NEW_ENTRY_CUTOFF
+    final_hour_eligible = (
+        final_hour_window
+        and directional_tier_thresholds_met
+        and not context.final_hour_entry_already_used
+    )
+    add(
+        "final_hour_one_shot",
+        not final_hour_window or not context.final_hour_entry_already_used,
+        context.final_hour_entry_already_used,
+        False,
+        RiskReason.OPEN_STRUCTURE_LIMIT,
+    )
+    add(
+        "final_hour_candidate_quality",
+        not final_hour_window or directional_tier_thresholds_met,
+        (
+            f"action={candidate.action.value}; confidence={confidence}; "
+            f"trend_strength={candidate.trend_strength}; reward_risk={reward_risk_ratio}; "
+            f"debit_to_width={debit_to_width_ratio}"
+        ),
+        "high-conviction SPY/QQQ/IWM directional debit spread",
+        RiskReason.INVALID_STRUCTURE,
+    )
+    add(
+        "final_hour_no_pending_entries",
+        not final_hour_window or not context.pending_underlyings,
+        ",".join(sorted(context.pending_underlyings)) or "none",
+        "none",
+        RiskReason.PENDING_UNDERLYING,
+    )
     add(
         "session_holding_window",
         holding.accepted,
@@ -234,7 +303,8 @@ def evaluate_risk(
     add(
         "existing_managed_structure",
         candidate.structure.underlying not in context.open_underlyings
-        or final_day_additional_index_structure,
+        or final_day_additional_index_structure
+        or final_hour_eligible,
         open_underlying_count,
         "0 normally; at most 1 existing structure for the final-day index override",
         RiskReason.EXISTING_STRUCTURE,
@@ -258,41 +328,9 @@ def evaluate_risk(
         RiskReason.TOTAL_CAP,
     )
 
-    index_strategy = (
-        candidate.action in INDEX_ACTIONS and candidate.structure.underlying in INDEX_UNDERLYINGS
-    )
-    confidence = Decimal(str(decision.confidence))
-    reward_risk_ratio = (
-        candidate.payoff_quality_ratio
-        if candidate.action is Action.INDEX_CONDOR and candidate.payoff_quality_ratio is not None
-        else candidate.structure.maximum_profit / candidate.structure.maximum_loss
-    )
-    spread_width = _spread_width(candidate)
-    debit_to_width_ratio = (
-        candidate.structure.net_price / spread_width
-        if candidate.action in DIRECTIONAL_INDEX_ACTIONS and spread_width > 0
-        else None
-    )
-    condor_tier_thresholds_met = (
-        index_strategy
-        and candidate.action is Action.INDEX_CONDOR
-        and confidence >= HIGH_CONVICTION_MIN_CONFIDENCE
-        and candidate.richness_ratio >= HIGH_CONVICTION_MIN_RICHNESS_RATIO
-        and reward_risk_ratio >= HIGH_CONVICTION_MIN_CONDOR_REWARD_RISK_RATIO
-    )
-    directional_tier_thresholds_met = (
-        index_strategy
-        and candidate.action in DIRECTIONAL_INDEX_ACTIONS
-        and confidence >= HIGH_CONVICTION_MIN_CONFIDENCE
-        and candidate.trend_strength is not None
-        and candidate.trend_strength >= HIGH_CONVICTION_MIN_DIRECTIONAL_TREND_STRENGTH
-        and reward_risk_ratio >= HIGH_CONVICTION_MIN_DIRECTIONAL_REWARD_RISK_RATIO
-        and debit_to_width_ratio is not None
-        and debit_to_width_ratio <= HIGH_CONVICTION_MAX_DEBIT_TO_WIDTH_RATIO
-    )
-    tier_thresholds_met = condor_tier_thresholds_met or directional_tier_thresholds_met
     hard_gates_passed = all(check.passed for check in checks)
     high_conviction_applied = tier_thresholds_met and hard_gates_passed
+    final_hour_applied = final_hour_eligible and hard_gates_passed
     final_competition_day = is_final_competition_day(context.now)
     maverick_signal_confirmed = candidate.candidate_id in context.maverick_candidate_ids
     maverick_applied = (
@@ -321,16 +359,36 @@ def evaluate_risk(
     if candidate.action is Action.EARNINGS_CONDOR:
         per_pct = EARNINGS_PER_STRUCTURE_PCT
         tier_name = "earnings"
+        per_budget = context.equity * per_pct
+    elif final_hour_applied:
+        per_budget = max(Decimal("0"), min(cluster_remaining, total_remaining))
+        per_pct = per_budget / context.equity
+        tier_name = "final_hour_remaining_headroom"
     elif maverick_applied:
         per_pct = MAVERICK_INDEX_PER_STRUCTURE_PCT
         tier_name = "maverick_directional"
+        per_budget = context.equity * per_pct
     elif high_conviction_applied:
         per_pct = HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT
         tier_name = "high_conviction_index"
+        per_budget = context.equity * per_pct
     else:
         per_pct = INDEX_PER_STRUCTURE_PCT
         tier_name = "standard_index"
-    per_budget = context.equity * per_pct
+        per_budget = context.equity * per_pct
+    add(
+        "final_hour_recovery_tier",
+        True,
+        (
+            f"applied={str(final_hour_applied).lower()}; window={str(final_hour_window).lower()}; "
+            f"one_shot_already_used={str(context.final_hour_entry_already_used).lower()}; "
+            f"directional_high_conviction={str(directional_tier_thresholds_met).lower()}; "
+            f"remaining_cluster_headroom={cluster_remaining}; "
+            f"remaining_total_headroom={total_remaining}"
+        ),
+        "2026-09-03 15:00-15:20 ET; one high-conviction directional; remaining 24% headroom",
+        RiskReason.PER_STRUCTURE_CAP,
+    )
     add(
         "maverick_final_day_tier",
         True,
@@ -397,9 +455,21 @@ def evaluate_risk(
         return _rejected(checks)
 
     available = max(Decimal("0"), min(per_budget, cluster_remaining, total_remaining))
-    quantity = int(
+    budget_quantity = int(
         (available / candidate.structure.maximum_loss).to_integral_value(rounding=ROUND_FLOOR)
     )
+    executable_depth = _entry_executable_depth(candidate) if final_hour_applied else None
+    quantity = (
+        min(budget_quantity, executable_depth or 0) if final_hour_applied else budget_quantity
+    )
+    if final_hour_applied:
+        add(
+            "full_quantity_executable_depth",
+            executable_depth is not None and executable_depth >= quantity and quantity >= 1,
+            f"quantity={quantity}; budget_quantity={budget_quantity}; depth={executable_depth}",
+            "each opening leg has displayed executable depth for the submitted parent quantity",
+            RiskReason.LIQUIDITY,
+        )
     awarded = candidate.structure.maximum_loss * quantity
     add(
         "per_structure_cap",
@@ -450,6 +520,16 @@ def _spread_width(candidate: Candidate) -> Decimal:
     if len(strikes) != 2:
         return Decimal("0")
     return strikes[1] - strikes[0]
+
+
+def _entry_executable_depth(candidate: Candidate) -> int | None:
+    capacities: list[int] = []
+    for leg in candidate.structure.legs:
+        displayed = leg.ask_size if leg.side is Side.BUY else leg.bid_size
+        if displayed is None or displayed <= 0:
+            return None
+        capacities.append(displayed // leg.ratio_qty)
+    return min(capacities) if capacities else None
 
 
 def _high_conviction_failures(

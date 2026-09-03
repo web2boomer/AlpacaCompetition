@@ -2,7 +2,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
-from money_machine.domain.clock import FORCED_FLATTEN_STARTS_AT, NEW_YORK
+from money_machine.domain.clock import (
+    FINAL_HOUR_RECOVERY_STARTS_AT,
+    FORCED_FLATTEN_STARTS_AT,
+    NEW_ENTRY_CUTOFF,
+    NEW_YORK,
+)
 from money_machine.domain.enums import Action, PositionIntent, Side
 from money_machine.domain.schemas import (
     BrokerOrderRequest,
@@ -90,6 +95,7 @@ class EntryHoldingPolicy:
 
 DAILY_HARD_EXIT_TIME = time(15, 50)
 MINIMUM_ENTRY_WINDOW = timedelta(minutes=30)
+FINAL_HOUR_MINIMUM_ENTRY_WINDOW = timedelta(minutes=15)
 
 
 def daily_hard_exit_deadline(at: datetime) -> datetime:
@@ -113,7 +119,12 @@ def entry_holding_policy(
     if maximum_holding_minutes is not None:
         requested_minutes = min(requested_minutes, maximum_holding_minutes)
     effective = min(timedelta(minutes=requested_minutes), available)
-    accepted = requested_minutes > 0 and effective >= MINIMUM_ENTRY_WINDOW
+    minimum_window = (
+        FINAL_HOUR_MINIMUM_ENTRY_WINDOW
+        if FINAL_HOUR_RECOVERY_STARTS_AT <= now <= NEW_ENTRY_CUTOFF
+        else MINIMUM_ENTRY_WINDOW
+    )
+    accepted = requested_minutes > 0 and effective >= minimum_window
     if effective == timedelta(minutes=model_holding_minutes):
         reason = "model_hold"
     elif maximum_holding_minutes is not None or hard_deadline is not None:

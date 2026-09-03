@@ -10,9 +10,10 @@ HACKATHON_STARTS_AT = datetime(2026, 8, 28, 13, 30, tzinfo=UTC)
 SCORING_STARTS_AT = datetime(2026, 8, 31, 13, 30, tzinfo=UTC)
 # Backwards-compatible name for the start of trading authority.
 STARTS_AT = SCORING_STARTS_AT
-NEW_ENTRY_CUTOFF = datetime(2026, 9, 3, 19, 15, tzinfo=UTC)
-FORCED_FLATTEN_STARTS_AT = datetime(2026, 9, 3, 19, 15, tzinfo=UTC)
-FLAT_TARGET_AT = datetime(2026, 9, 3, 19, 45, tzinfo=UTC)
+FINAL_HOUR_RECOVERY_STARTS_AT = datetime(2026, 9, 3, 19, 0, tzinfo=UTC)
+NEW_ENTRY_CUTOFF = datetime(2026, 9, 3, 19, 20, tzinfo=UTC)
+FORCED_FLATTEN_STARTS_AT = datetime(2026, 9, 3, 19, 35, tzinfo=UTC)
+FLAT_TARGET_AT = datetime(2026, 9, 3, 19, 50, tzinfo=UTC)
 EOD_EQUITY_SNAPSHOT_AT = datetime(2026, 9, 3, 20, 0, tzinfo=UTC)
 ENDS_AT = datetime(2026, 9, 4, 13, 30, tzinfo=UTC)
 BASELINE_EQUITY = Decimal("100000.00")
@@ -78,7 +79,11 @@ def competition_entry_window_open(at: datetime) -> bool:
         raise ValueError("competition entry window requires a timezone-aware timestamp")
     local = at.astimezone(NEW_YORK)
     wall_time = local.time().replace(tzinfo=None)
-    return local.weekday() < 5 and DAILY_ENTRY_START_TIME <= wall_time < DAILY_ENTRY_CUTOFF_TIME
+    final_day = local.date() == EOD_EQUITY_SNAPSHOT_AT.astimezone(NEW_YORK).date()
+    before_cutoff = (
+        wall_time <= DAILY_ENTRY_CUTOFF_TIME if final_day else wall_time < DAILY_ENTRY_CUTOFF_TIME
+    )
+    return local.weekday() < 5 and wall_time >= DAILY_ENTRY_START_TIME and before_cutoff
 
 
 def competition_clock(at: datetime, *, has_exposure: bool) -> CompetitionClockSnapshot:
@@ -87,7 +92,7 @@ def competition_clock(at: datetime, *, has_exposure: bool) -> CompetitionClockSn
     now = at.astimezone(UTC)
     if now < STARTS_AT:
         state = ExecutionState.OBSERVE_ONLY
-    elif now < NEW_ENTRY_CUTOFF:
+    elif now <= NEW_ENTRY_CUTOFF:
         state = ExecutionState.FULL_EXECUTION
     elif now < ENDS_AT:
         state = ExecutionState.CLOSE_ONLY

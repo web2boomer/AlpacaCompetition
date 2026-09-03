@@ -159,6 +159,112 @@ async def test_quantity_rounds_down_to_per_structure_cap(replay_candidate) -> No
     assert result.awarded_risk <= Decimal("3000")
 
 
+@pytest.mark.asyncio
+async def test_final_hour_tier_uses_remaining_24_percent_headroom(replay_candidate) -> None:
+    candidate = directional_candidate(replay_candidate)
+    legs = tuple(
+        leg.model_copy(update={"bid_size": 200, "ask_size": 200})
+        for leg in candidate.structure.legs
+    )
+    candidate = candidate.model_copy(
+        update={"structure": candidate.structure.model_copy(update={"legs": legs})}
+    )
+    result = evaluate_risk(
+        decision(candidate, confidence=0.80, maximum_holding_minutes=20),
+        candidate,
+        context(
+            now="2026-09-03T19:15:00Z",
+            equity=Decimal("86000"),
+            start_of_day_equity=Decimal("99243.24"),
+            peak_equity=Decimal("100000"),
+            total_open_defined_loss=Decimal("5292"),
+            index_cluster_defined_loss=Decimal("5292"),
+            open_alpha_structures=1,
+            open_underlyings=frozenset({candidate.structure.underlying}),
+            open_underlying_structure_counts={candidate.structure.underlying: 1},
+        ),
+    )
+
+    assert result.approved
+    assert result.quantity == 153
+    assert result.awarded_risk == Decimal("15300.00")
+    assert "applied=true" in check(result, "final_hour_recovery_tier").actual
+    assert check(result, "effective_per_structure_budget").actual == "15348.00"
+    assert "depth=200" in check(result, "full_quantity_executable_depth").actual
+
+
+@pytest.mark.asyncio
+async def test_final_hour_quantity_is_capped_by_full_leg_depth(replay_candidate) -> None:
+    candidate = directional_candidate(replay_candidate)
+    legs = tuple(
+        leg.model_copy(update={"bid_size": 80, "ask_size": 80}) for leg in candidate.structure.legs
+    )
+    candidate = candidate.model_copy(
+        update={"structure": candidate.structure.model_copy(update={"legs": legs})}
+    )
+    result = evaluate_risk(
+        decision(candidate, confidence=0.80, maximum_holding_minutes=20),
+        candidate,
+        context(now="2026-09-03T19:15:00Z", equity=Decimal("86000")),
+    )
+
+    assert result.approved
+    assert result.quantity == 80
+    assert result.awarded_risk == Decimal("8000.00")
+    assert "budget_quantity=206" in check(result, "full_quantity_executable_depth").actual
+
+
+@pytest.mark.asyncio
+async def test_final_hour_missing_displayed_depth_fails_closed(replay_candidate) -> None:
+    candidate = directional_candidate(replay_candidate)
+    legs = tuple(
+        leg.model_copy(update={"bid_size": None, "ask_size": None})
+        for leg in candidate.structure.legs
+    )
+    candidate = candidate.model_copy(
+        update={"structure": candidate.structure.model_copy(update={"legs": legs})}
+    )
+    result = evaluate_risk(
+        decision(candidate, confidence=0.80, maximum_holding_minutes=20),
+        candidate,
+        context(now="2026-09-03T19:15:00Z", equity=Decimal("86000")),
+    )
+
+    assert not result.approved
+    assert RiskReason.LIQUIDITY in result.reason_codes
+    assert not check(result, "full_quantity_executable_depth").passed
+
+
+@pytest.mark.asyncio
+async def test_final_hour_rejects_second_entry_and_non_high_conviction(replay_candidate) -> None:
+    candidate = directional_candidate(replay_candidate)
+    legs = tuple(
+        leg.model_copy(update={"bid_size": 300, "ask_size": 300})
+        for leg in candidate.structure.legs
+    )
+    candidate = candidate.model_copy(
+        update={"structure": candidate.structure.model_copy(update={"legs": legs})}
+    )
+    used = evaluate_risk(
+        decision(candidate, confidence=0.80, maximum_holding_minutes=20),
+        candidate,
+        context(
+            now="2026-09-03T19:15:00Z",
+            final_hour_entry_already_used=True,
+        ),
+    )
+    weak = evaluate_risk(
+        decision(candidate, confidence=0.79, maximum_holding_minutes=20),
+        candidate,
+        context(now="2026-09-03T19:15:00Z"),
+    )
+
+    assert not used.approved
+    assert not check(used, "final_hour_one_shot").passed
+    assert not weak.approved
+    assert not check(weak, "final_hour_candidate_quality").passed
+
+
 def test_daily_loss_provisional_or_latched_state_blocks_entries(replay_candidate) -> None:
     result = evaluate_risk(
         decision(replay_candidate),

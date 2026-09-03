@@ -16,48 +16,35 @@ For any material strategy or sizing recommendation, report:
 
 The fixed development and production account mapping is recorded in `docs/COMPETITION_ACCOUNTS.md` and must not be changed during the scoring period.
 
-## Continuous production delivery
+# Final-day standing authorization
 
-Production uses continuous deployment. Every validated commit intended for `main` must be
-pushed and deployed promptly; do not leave completed production commits local or undeployed.
+As of 2026-09-03, Alex has granted standing authorization through the official competition equity lock for agents to implement, push, and deploy validated, in-scope Money Machine production changes without repeatedly requesting discretionary approval. Time-to-production is a competition constraint: do not pause a ready change merely to reconfirm an already authorized policy.
+
+The earlier 11% daily-loss boundary and 12% correlated index-cluster limit are superseded for the remainder of 2026-09-03 by Alex's explicit final-day risk-on authorization. The authorized final-day policy disables daily-loss and competition-drawdown entry halts, raises both correlated index-cluster and total defined-loss limits to 24% of current equity, and permits one additional independently validated atomic defined-risk structure per already-used index underlying. This is a one-time competition policy and must not survive the 16:00 ET equity lock.
+
+Every final-day directional debit spread retains a 2.10x opening-debit take-profit, 0.65x debit stop, and 45-minute maximum hold. New entries still end at 14:30 ET, forced flatten still begins at 15:15 ET, the internal flat target remains 15:45 ET, and the official equity lock remains 16:00 ET.
+
+This standing authorization does not permit agents to remove the official-account fingerprint, paper-only transport, atomic defined-risk MLEG execution, the final-day 24% deterministic aggregate cap, reconciliation, data freshness, liquidity, event, lifecycle, order idempotency, new-entry cutoff, forced-flatten, audit, or emergency-exit controls. It also does not override any approval that the execution platform itself requires or authorize unrelated destructive, credential, billing, or external-account actions.
+
+# Final-hour recovery mandate
+
+As of 15:00 ET on 2026-09-03, Alex has authorized a final-hour recovery policy whose sole competition objective is to reach and lock at least $104,000 of official account equity. This section supersedes the earlier final-day per-structure sizing, structure-count, new-entry cutoff, and timing values only until the 16:00 ET equity lock. It must not be reused after the competition.
+
+The strategy may allocate the full remaining 24% aggregate defined-loss budget to one independently validated, high-conviction, same-day SPY, QQQ, or IWM directional debit spread. Existing correlated defined loss counts against that budget. The selected structure must have fresh two-cycle directional confirmation, current liquid quotes, deterministic positive reward-to-risk, sufficient executable depth for the full quantity, and an exact invalidation and exit path. Do not manufacture a trade when those conditions are absent, alternate positions randomly, or submit overlapping orders while a parent is pending or unreconciled.
+
+For this final-hour structure, the per-structure cap equals the remaining headroom under the 24% total and correlated-index caps. New entries may continue through 15:20 ET. Forced flatten begins at 15:35 ET, the required internal flat target is 15:50 ET, and the official equity lock remains 16:00 ET. The final-hour structure uses a 2.10x opening-debit take-profit, a 0.65x opening-debit stop, and a maximum hold ending no later than 15:35 ET. When verified official equity reaches $104,000, immediately close all exposure, block further entries, and preserve the result.
+
+This mandate does not remove the official-account fingerprint, paper-only transport, atomic defined-risk MLEG execution, the 24% deterministic aggregate cap, reconciliation, data freshness, liquidity, event, lifecycle, order idempotency, audit, target lock, or emergency-exit controls. Deployment itself must not mutate broker state; only an ordinary scheduler cycle may trade.
+
+# Continuous production delivery
+
+Production is continuously deployed during the competition. Every validated commit intended for `main` must be pushed and deployed promptly; agents must not accumulate completed, undeployed production commits.
 
 For every production commit:
 
-- complete formatting, lint, strict typing, migration, and full test gates;
-- push the exact validated commit without force-pushing;
-- deploy the dashboard and scheduler at the exact same SHA;
-- when a database migration is included, deploy the dashboard first and require its pre-deploy
-  migration to succeed before deploying the scheduler;
-- verify both deploys are live, then verify the first ordinary production cycle for the official
-  account fingerprint, execution state, reconciliation, incidents, positions, working orders,
-  defined-loss totals, and service health; and
-- verify that deployment itself did not create, cancel, replace, or mutate broker orders or
-  positions.
-
-Escalate any blocker immediately rather than leaving production behind. Never manually alter
-positions or orders as part of deployment verification.
-
-## Standing final-day authorization
-
-Alex has authorized the Thursday-only final-day recovery policy without repeated discretionary
-confirmation gates. For the remainder of 2026-09-03, daily-loss and competition-drawdown states
-remain audited but neither halt new entries nor force portfolio liquidation merely because those
-loss thresholds remain breached. Reconciliation-safety exits and every position-specific exit
-remain active. Correlated-index and total defined-loss caps are both 24% of current equity. At most
-one additional independently validated atomic defined-risk structure may be added per already-used
-SPY/QQQ/IWM underlying. Every Thursday directional debit spread uses a 2.10-times opening-debit
-take-profit, a 0.65-times premium-value stop, and a 45-minute maximum hold.
-
-The authoritative final-day profit target is $104,000 of verified official-account equity. On
-2026-09-03 only, the first clean official mark at or above that target latches through the 16:00 ET
-equity lock: new entries stop, pending entries cancel through normal lifecycle, and open structures
-close atomically through the normal exit path. The Passport must identify the current verified mark
-or persisted clean official peak that activated the latch. This target lock cannot activate from an
-unreconciled mark and does not apply on another date.
-
-This authorization never weakens the official-account and paper-only guards, atomic defined-risk
-MLEG requirement, deterministic caps, reconciliation, liquidity, data, event, lifecycle,
-idempotency, the one-additional-structure ceiling, deterministic minimum 30-minute holding window,
-15:15 forced flatten and entry-authority cutoff, 15:45 flat target, 16:00 equity lock, or emergency
-controls. Agents must not invent an additional
-approval pause when those deterministic gates pass, and must not add risk beyond their limits.
+- Run the complete required quality gates before pushing, including formatting/lint, strict typing, migrations where applicable, and the full test suite.
+- Deploy the dashboard and scheduler at the exact same Git SHA and verify both Render deploys reach `live`.
+- If the commit contains a database migration, deploy the dashboard first, require its pre-deploy migration to complete successfully, and only then deploy the scheduler. Do not race a scheduler against unapplied schema.
+- Verify the first ordinary production cycle after deployment: official competition account fingerprint, execution state, reconciliation, incidents, positions, working orders, defined-loss totals, and scheduler/dashboard health.
+- A deployment must not itself create, cancel, replace, or otherwise mutate a broker order or position. Trading changes must occur only through an ordinary authorized scheduler cycle.
+- Report the deployed SHA, service deployment identifiers, test evidence, first-passport verification, and any blocker. If a commit cannot be deployed, escalate immediately rather than silently leaving production behind.

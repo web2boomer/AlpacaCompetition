@@ -10,7 +10,9 @@ from money_machine.domain.candidates import CandidateBuildReport, build_candidat
 from money_machine.domain.clock import (
     BASELINE_EQUITY,
     EOD_EQUITY_SNAPSHOT_AT,
+    FINAL_HOUR_RECOVERY_STARTS_AT,
     FORCED_FLATTEN_STARTS_AT,
+    NEW_ENTRY_CUTOFF,
     CompetitionClockSnapshot,
     competition_clock,
     competition_entry_window_open,
@@ -544,6 +546,7 @@ class AgentService:
                     if item.get("maverick_signal_confirmed") is True
                 ),
                 maverick_entry_already_used=self.repository.maverick_entry_used(now=now),
+                final_hour_entry_already_used=self.repository.final_hour_entry_used(now=now),
             )
             risk = evaluate_risk(envelope.decision, selected, context)
             holding_policy = entry_holding_policy(
@@ -1228,7 +1231,14 @@ def _portfolio_candidate_exclusions(
             and underlying in UNIVERSE
             and open_underlying_structure_counts.get(underlying, 1) == 1
         )
-        if underlying in open_underlyings and not final_day_additional_index_structure:
+        final_hour_structure_override = (
+            FINAL_HOUR_RECOVERY_STARTS_AT <= now <= NEW_ENTRY_CUTOFF and underlying in UNIVERSE
+        )
+        if (
+            underlying in open_underlyings
+            and not final_day_additional_index_structure
+            and not final_hour_structure_override
+        ):
             reasons.append("existing_managed_structure_for_underlying")
         if reasons:
             exclusions[candidate.candidate_id] = tuple(reasons)

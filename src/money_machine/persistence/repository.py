@@ -496,6 +496,25 @@ class AuditRepository:
                     return True
         return False
 
+    def final_hour_entry_used(self, *, now: datetime) -> bool:
+        """Return whether the date-bound final-hour recovery entry was submitted."""
+        final_hour_start = datetime(2026, 9, 3, 19, 0, tzinfo=UTC)
+        if now.astimezone(UTC) < final_hour_start:
+            return False
+        with self.database.session() as session:
+            orders = session.scalars(
+                select(BrokerOrderORM).where(
+                    BrokerOrderORM.environment_role == "competition",
+                    BrokerOrderORM.submitted_at >= final_hour_start,
+                    BrokerOrderORM.submitted_at <= EOD_EQUITY_SNAPSHOT_AT,
+                )
+            )
+            for order in orders:
+                request = order.raw_json.get("request", {})
+                if isinstance(request, dict) and not request.get("is_closing", False):
+                    return True
+        return False
+
     def persist_order(
         self,
         run_id: str,

@@ -400,23 +400,22 @@ def test_lifecycle_closes_at_persisted_event_safe_deadline(replay_candidate) -> 
     assert signal.reason == "maximum_holding_time"
 
 
-def test_daily_deadline_is_dst_aware_and_thursday_flatten_is_earlier() -> None:
+def test_daily_deadline_is_dst_aware_and_final_hour_flatten_is_earlier() -> None:
     assert daily_hard_exit_deadline(datetime(2026, 7, 1, 14, tzinfo=UTC)).hour == 19
     assert daily_hard_exit_deadline(datetime(2026, 1, 5, 15, tzinfo=UTC)).hour == 20
     thursday = entry_holding_policy(datetime(2026, 9, 3, 19, 0, tzinfo=UTC), 120)
-    assert thursday.effective_deadline == datetime(2026, 9, 3, 19, 15, tzinfo=UTC)
-    assert not thursday.accepted
+    assert thursday.effective_deadline == datetime(2026, 9, 3, 19, 35, tzinfo=UTC)
+    assert thursday.accepted
 
 
-def test_final_day_extended_entry_window_uses_remaining_holding_time() -> None:
-    last_accepted_cycle = entry_holding_policy(datetime(2026, 9, 3, 18, 45, tzinfo=UTC), 45)
-    rejected_cycle = entry_holding_policy(datetime(2026, 9, 3, 18, 50, tzinfo=UTC), 45)
+def test_final_hour_exact_1520_entry_has_fifteen_minute_managed_window() -> None:
+    exact = entry_holding_policy(datetime(2026, 9, 3, 19, 20, tzinfo=UTC), 45)
+    late = entry_holding_policy(datetime(2026, 9, 3, 19, 20, 1, tzinfo=UTC), 45)
 
-    assert last_accepted_cycle.accepted
-    assert last_accepted_cycle.effective_holding_minutes == 30
-    assert last_accepted_cycle.effective_deadline == datetime(2026, 9, 3, 19, 15, tzinfo=UTC)
-    assert not rejected_cycle.accepted
-    assert rejected_cycle.reason == "insufficient_tradable_session_window"
+    assert exact.accepted
+    assert exact.effective_holding_minutes == 15
+    assert exact.effective_deadline == datetime(2026, 9, 3, 19, 35, tzinfo=UTC)
+    assert not late.accepted
 
 
 def test_soft_close_backs_off_without_quote_change_but_urgent_exit_cancels() -> None:

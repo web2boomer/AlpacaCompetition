@@ -210,6 +210,7 @@ class RiskContext(StrictModel):
     daily_loss_entry_halt_active: bool = False
     maverick_candidate_ids: frozenset[str] = frozenset()
     maverick_entry_already_used: bool = False
+    final_hour_entry_already_used: bool = False
 
 
 class AuctionResult(StrictModel):
