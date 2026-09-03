@@ -2188,7 +2188,8 @@ async def test_final_day_portfolio_loss_is_audited_without_forced_liquidation(
     )
 
     control = outcome.passport["daily_loss_control"]
-    assert control["entry_halt_active"] is True
+    assert control["status"] in {"provisional", "latched"}
+    assert control["entry_halt_active"] is False
     assert control["portfolio_loss_exit_override_applied"] is True
     assert control["portfolio_exit_reason"] is None
     assert len(replay_adapter.submitted_requests) == before

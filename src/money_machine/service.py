@@ -381,7 +381,10 @@ class AgentService:
                 )
             daily_loss_evidence = {
                 "status": daily_control.status,
-                "entry_halt_active": daily_control.status in {"provisional", "latched"},
+                "entry_halt_active": (
+                    daily_control.status in {"provisional", "latched"}
+                    and not is_final_competition_day(now)
+                ),
                 "confirmation_count": daily_control.confirmation_count,
                 "raw_equity": str(raw_account.equity),
                 "confirmed_equity": str(account.equity),

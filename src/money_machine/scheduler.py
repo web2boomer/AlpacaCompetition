@@ -41,8 +41,9 @@ async def run_scheduler(
     async with AlpacaMcpV2Adapter(settings) as adapter:
         while not stop.is_set():
             now = datetime.now(UTC).replace(second=0, microsecond=0)
-            liquidation_recovery = now >= FORCED_FLATTEN_STARTS_AT and not broker_confirmed_flat
-            lease_ttl = 90 if liquidation_recovery else 360
+            lease_ttl = scheduler_lease_ttl_seconds(
+                now, broker_confirmed_flat=broker_confirmed_flat
+            )
             if not repository.acquire_scheduler_lease(
                 name="trading-loop", owner_id=owner, now=now, ttl_seconds=lease_ttl
             ):
@@ -95,3 +96,8 @@ def scheduler_interval_seconds(now: datetime, *, broker_confirmed_flat: bool) ->
     )
     final_window = FINAL_HOUR_RECOVERY_STARTS_AT <= now.astimezone(UTC) <= EOD_EQUITY_SNAPSHOT_AT
     return 60 if final_window or liquidation_recovery else 300
+
+
+def scheduler_lease_ttl_seconds(now: datetime, *, broker_confirmed_flat: bool) -> int:
+    interval = scheduler_interval_seconds(now, broker_confirmed_flat=broker_confirmed_flat)
+    return 90 if interval == 60 else 360

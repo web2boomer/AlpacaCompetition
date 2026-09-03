@@ -43,6 +43,7 @@ As of 15:25 ET on 2026-09-03, Alex has authorized the ordinary scheduler to eval
 New-entry authority includes the exact 15:45 ET boundary, forced flatten begins at 15:50 ET, the required broker-confirmed flat target is 15:57 ET, and the official 16:00 ET equity lock is unchanged. Each entry is sized only from live remaining headroom and its maximum hold is clamped to 15:50 ET. A stopped same-underlying setup may requalify only with fresh independent two-cycle confirmation; an identical stale signal remains blocked. This amendment expires at the equity lock and does not authorize manual broker orders or invalid candidates.
 
 For the remainder of this final window, the ordinary production scheduler runs once per minute through the 16:00 ET lock. Each one-minute cycle may submit at most one eligible parent through the inclusive 15:45 cutoff; after that it continues lifecycle, reconciliation, target, stop, and forced-flatten work only. Repeated identical submitted snapshots, duplicate cycles, and overlapping pending parents remain fail-closed.
+The scheduler lease TTL is 90 seconds during this window so a normal deploy or process replacement cannot leave the one-minute loop blocked behind the prior process's five-minute lease.
 
 # Continuous production delivery
 
