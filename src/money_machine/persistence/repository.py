@@ -20,7 +20,7 @@ from money_machine.domain.clock import (
     is_regular_market_performance_observation,
     scoring_window_state,
 )
-from money_machine.domain.enums import ExecutionState, RunMode, Side
+from money_machine.domain.enums import Action, ExecutionState, RunMode, Side
 from money_machine.domain.schemas import (
     AccountSnapshot,
     AuctionResult,
@@ -33,7 +33,11 @@ from money_machine.domain.schemas import (
     RiskDecisionResult,
     UnderlyingSnapshot,
 )
-from money_machine.execution import ManagedOrder, ManagedStructure
+from money_machine.execution import (
+    MAVERICK_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE,
+    ManagedOrder,
+    ManagedStructure,
+)
 from money_machine.persistence.database import Database
 from money_machine.persistence.models import (
     AgentRunORM,
@@ -751,7 +755,13 @@ class AuditRepository:
         managed: list[ManagedStructure] = []
         with self.database.session() as session:
             rows = session.execute(
-                select(BrokerOrderORM, CandidateORM, OptionStructureORM, ModelDecisionORM)
+                select(
+                    BrokerOrderORM,
+                    CandidateORM,
+                    OptionStructureORM,
+                    ModelDecisionORM,
+                    RiskDecisionORM,
+                )
                 .join(
                     CandidateORM,
                     and_(
@@ -767,13 +777,17 @@ class AuditRepository:
                     ModelDecisionORM,
                     ModelDecisionORM.agent_run_id == BrokerOrderORM.agent_run_id,
                 )
+                .join(
+                    RiskDecisionORM,
+                    RiskDecisionORM.agent_run_id == BrokerOrderORM.agent_run_id,
+                )
                 .where(
                     BrokerOrderORM.status.in_(
                         ("filled", "closing", "partially_filled_canceled", "externally_reduced")
                     )
                 )
             )
-            for order, candidate, structure, decision in rows:
+            for order, candidate, structure, decision, risk in rows:
                 request = order.raw_json.get("request", {})
                 if isinstance(request, dict) and request.get("is_closing"):
                     continue
@@ -809,10 +823,11 @@ class AuditRepository:
                             maximum_profit=structure.maximum_profit,
                             is_credit=structure.is_credit,
                         ),
-                        take_profit_multiple=(
-                            Decimal(str(request["take_profit_multiple"]))
-                            if request.get("take_profit_multiple") is not None
-                            else None
+                        take_profit_multiple=_managed_take_profit_multiple(
+                            order=order,
+                            structure=structure,
+                            risk=risk,
+                            request=request,
                         ),
                     )
                 )
@@ -1742,6 +1757,38 @@ def _daily_loss_control(row: DailyLossControlORM) -> DailyLossControl:
         quote_quality_passed=row.quote_quality_passed,
         reason=row.reason,
     )
+
+
+def _managed_take_profit_multiple(
+    *,
+    order: BrokerOrderORM,
+    structure: OptionStructureORM,
+    risk: RiskDecisionORM,
+    request: dict[str, Any],
+) -> Decimal | None:
+    persisted = request.get("take_profit_multiple")
+    if persisted is not None:
+        return Decimal(str(persisted))
+    opened_at = _safe_datetime(order.submitted_at)
+    final_day = EOD_EQUITY_SNAPSHOT_AT.astimezone(NEW_YORK).date()
+    directional = structure.strategy in {
+        Action.CALL_DEBIT_SPREAD.value,
+        Action.PUT_DEBIT_SPREAD.value,
+    }
+    high_conviction = any(
+        check.get("name") == "high_conviction_index_tier"
+        and "applied=true" in str(check.get("actual", ""))
+        for check in risk.checks_json
+        if isinstance(check, dict)
+    )
+    if (
+        order.environment_role == "competition"
+        and opened_at.astimezone(NEW_YORK).date() == final_day
+        and directional
+        and high_conviction
+    ):
+        return MAVERICK_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE
+    return None
 
 
 def _filled_structure_price(

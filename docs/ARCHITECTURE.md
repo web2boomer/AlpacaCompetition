@@ -66,10 +66,12 @@ backoff, while urgent safety exits retain aggressive bounded concessions.
 
 On the final competition day, the 08:30 ET Productivity/international-trade release retains a
 75-minute fail-closed cooldown, making 09:45 ET the earliest possible entry. Directional debit
-spreads require the existing two-cycle post-open confirmation and use an executable-quote
-take-profit at 1.35 times the broker-confirmed opening debit; their 0.65 premium-value stop and
-45-minute cap remain. Same-day contracts remain eligible throughout their New York expiration
-date; expired prior-date contracts remain excluded.
+spreads require the existing two-cycle post-open confirmation. Thursday high-conviction
+directional exposure uses an executable-quote take-profit at 2.10 times the broker-confirmed
+opening debit, including already-open exposure whose persisted Risk Decision proves the tier;
+other competition directional debits retain 1.35. The 0.65 premium-value stop and 45-minute cap
+remain. Same-day contracts remain eligible throughout their New York expiration date; expired
+prior-date contracts remain excluded.
 
 During the final September 2–3 competition recovery window, the production selector is
 directional-only for new entries. Condors remain in the complete candidate report for audit and
@@ -97,5 +99,7 @@ structural safety incidents keep immediate close authority.
 The Thursday-only Maverick tier is one atomic high-conviction directional debit submission while
 the correlated index cluster is flat. It is capped by both 12% of current equity and the existing
 12% cluster cap, adds a fresh five-minute acceleration or reset-and-reconfirmed-reversal gate, and
-persists a 2.10-times debit exit target. The 0.65 stop, 45-minute maximum hold, liquidity, event,
-reconciliation, account, idempotency, cutoff and forced-flatten controls remain authoritative.
+persists a 2.10-times debit exit target. That target also applies to other Thursday
+high-conviction directional exposure without expanding its awarded risk. The 0.65 stop,
+45-minute maximum hold, liquidity, event, reconciliation, account, idempotency, cutoff and
+forced-flatten controls remain authoritative.

@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -23,10 +24,15 @@ from money_machine.persistence.models import (
     EquitySnapshotORM,
     FillORM,
     MarketSnapshotORM,
+    RiskDecisionORM,
 )
 from money_machine.persistence.repository import DirectionalStopRecord, PriorMarketObservation
 from money_machine.safety import configured_account_fingerprint
-from money_machine.service import AgentService, _directional_policy_exclusions
+from money_machine.service import (
+    AgentService,
+    _directional_policy_exclusions,
+    _entry_take_profit_multiple,
+)
 from money_machine.settings import Settings
 
 
@@ -177,6 +183,70 @@ def test_maverick_submission_persists_target_and_consumes_daily_one_shot(
         )
         assert persisted is not None
         assert persisted.raw_json["request"]["take_profit_multiple"] == "2.10"
+
+
+def test_final_day_high_conviction_directional_entry_uses_two_point_ten(
+    directional_candidate,
+) -> None:
+    high_conviction = SimpleNamespace(
+        checks=[
+            SimpleNamespace(
+                name="high_conviction_index_tier",
+                actual="applied=true; tier=high_conviction_index",
+            )
+        ]
+    )
+
+    assert _entry_take_profit_multiple(
+        risk=high_conviction,
+        selected=directional_candidate,
+        now=datetime(2026, 9, 3, 16, 15, tzinfo=UTC),
+    ) == Decimal("2.10")
+    assert (
+        _entry_take_profit_multiple(
+            risk=high_conviction,
+            selected=directional_candidate,
+            now=datetime(2026, 9, 2, 16, 15, tzinfo=UTC),
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_existing_final_day_high_conviction_directional_uses_two_point_ten(
+    settings, repository, replay_adapter
+) -> None:
+    opened = await AgentService(settings, repository).run_cycle(
+        adapter=replay_adapter,
+        model=DirectionalReplayModel(),
+        now=replay_adapter.observed_at,
+        mode=RunMode.REPLAY,
+    )
+    assert opened.order_submitted
+    with repository.database.session() as session:
+        order = session.scalar(
+            select(BrokerOrderORM).where(BrokerOrderORM.agent_run_id == opened.run_id)
+        )
+        risk = session.scalar(
+            select(RiskDecisionORM).where(RiskDecisionORM.agent_run_id == opened.run_id)
+        )
+        assert order is not None
+        assert risk is not None
+        order.environment_role = "competition"
+        order.submitted_at = datetime(2026, 9, 3, 16, 15, tzinfo=UTC)
+        request = order.raw_json["request"]
+        request["take_profit_multiple"] = None
+        order.raw_json = {**order.raw_json, "request": request}
+        risk.checks_json = [
+            {
+                "name": "high_conviction_index_tier",
+                "actual": "applied=true; tier=high_conviction_index",
+            }
+        ]
+
+    managed = repository.open_managed_structures()[0]
+
+    assert managed.take_profit_multiple == Decimal("2.10")
 
 
 async def seed_managed_position(settings, repository, replay_adapter, *, quantity: str = "1"):

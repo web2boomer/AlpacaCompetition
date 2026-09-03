@@ -36,3 +36,18 @@ For every production commit:
 
 Escalate any blocker immediately rather than leaving production behind. Never manually alter
 positions or orders as part of deployment verification.
+
+## Standing final-day authorization
+
+Alex has authorized the Thursday-only final-day recovery policy without repeated discretionary
+confirmation gates: an 11% daily-loss boundary against the fixed session baseline, and one
+qualifying high-conviction SPY/QQQ/IWM directional debit spread sized up to 12% of current equity
+within the 12% correlated-index cluster cap. Thursday high-conviction directional exposure uses
+a 2.10-times opening-debit take-profit, a 0.65-times premium-value stop, and a 45-minute maximum
+hold. The one-shot 12% sizing tier additionally requires no concurrent correlated-index exposure.
+
+This authorization never weakens the official-account and paper-only guards, atomic defined-risk
+MLEG requirement, deterministic caps, reconciliation, liquidity, data, event, lifecycle,
+idempotency, no-pyramiding, cutoff, forced-flatten, or emergency controls. Agents must not invent
+an additional approval pause when those deterministic gates pass, and must not add risk beyond
+their limits.

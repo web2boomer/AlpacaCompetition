@@ -543,10 +543,10 @@ class AgentService:
                         is_credit=selected.structure.is_credit,
                         legs=selected.structure.legs,
                         environment_role=self.settings.account_role.value,
-                        take_profit_multiple=(
-                            MAVERICK_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE
-                            if _risk_check_applied(risk, "maverick_final_day_tier")
-                            else None
+                        take_profit_multiple=_entry_take_profit_multiple(
+                            risk=risk,
+                            selected=selected,
+                            now=now,
                         ),
                     )
                     order_result = await adapter.place_option_order(order_request)
@@ -976,6 +976,20 @@ def _risk_check_applied(risk: Any, name: str) -> bool:
     return any(check.name == name and "applied=true" in check.actual for check in risk.checks)
 
 
+def _entry_take_profit_multiple(*, risk: Any, selected: Candidate, now: datetime) -> Decimal | None:
+    final_competition_day = daily_loss_pct_at(now) > DAILY_LOSS_PCT
+    directional = selected.action in {Action.CALL_DEBIT_SPREAD, Action.PUT_DEBIT_SPREAD}
+    if (
+        final_competition_day
+        and directional
+        and _risk_check_applied(risk, "high_conviction_index_tier")
+    ):
+        return MAVERICK_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE
+    if _risk_check_applied(risk, "maverick_final_day_tier"):
+        return MAVERICK_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE
+    return None
+
+
 def _passport(
     *,
     run_id: str,
@@ -1197,6 +1211,11 @@ def _strategy_rotation_before_selection(
                     str(current_multiple) if current_multiple is not None else None
                 ),
                 "maximum_progress_multiple": str(maximum_progress),
+                "take_profit_multiple": (
+                    str(managed.take_profit_multiple)
+                    if managed.take_profit_multiple is not None
+                    else None
+                ),
                 "meaningful_progress_threshold": str(MEANINGFUL_PROGRESS_MULTIPLE),
                 "meaningful_progress": meaningful,
                 "rotation_due": open_elapsed >= 45 and not meaningful,

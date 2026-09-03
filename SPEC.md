@@ -374,9 +374,11 @@ Competition limits:
 - No naked legs.
 - No market orders for multi-leg entries or exits under normal operation.
 - No quantity increase after an adverse move.
-- Competition directional debit spreads take profit when fresh executable closing quotes reach
-  1.35 times opening debit. Other debit strategies retain the 1.50 multiple, credit strategies
-  retain their separate exit policy, and the directional 0.65 premium-value stop is unchanged.
+- On the Thursday final day, high-conviction index directional debit spreads take profit when
+  fresh executable closing quotes reach 2.10 times opening debit, including positions opened
+  before this rule was deployed when their persisted Risk Decision proves that tier. Other
+  competition directional debit spreads retain the 1.35 multiple, other debit strategies retain
+  1.50, and the directional 0.65 premium-value stop is unchanged.
 - The final-day directional playbook rotates deterministically after 45 minutes. Decision
   Passports persist the flat/no-entry clock and each open structure's elapsed time and best
   executable progress. A setup that remains flat and unproductive for the full interval is
@@ -392,7 +394,8 @@ Competition limits:
   cluster is flat. It requires every normal hard gate plus at least 0.10 percentage point of
   five-minute absolute-trend acceleration, or a persisted reset followed by a reconfirmed
   reversal. The submitted order persists a 2.10-times debit target, the unchanged 0.65 stop and
-  45-minute maximum hold. Any prior submission that day disables this one-shot tier.
+  45-minute maximum hold. Any prior submission that day disables this one-shot sizing tier; the
+  2.10-times final-day high-conviction exit target remains applicable independently of sizing.
 - The final-day target scenario assumes two independently qualifying high-conviction debit
   spreads near $5,954.59 each. Two 35% exits are about +$4,168 gross before slippage; one winner
   and one symmetric 35% stopped loser are approximately flat. Two stops are about -$4,168 before
