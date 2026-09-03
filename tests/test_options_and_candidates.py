@@ -211,6 +211,34 @@ def test_thursday_release_cooldown_ends_at_0945_et() -> None:
 
 
 @pytest.mark.asyncio
+async def test_thursday_directional_compiler_selects_same_day_0dte_contracts(
+    replay_adapter,
+) -> None:
+    now = datetime(2026, 9, 3, 13, 45, tzinfo=UTC)
+    expiration = datetime(2026, 9, 3, 0, 0, tzinfo=UTC)
+    snapshot, chain = await iwm_directional_inputs(replay_adapter, bullish=True)
+    snapshot = snapshot.model_copy(update={"observed_at": now})
+    same_day_chain = [
+        quote.model_copy(
+            update={
+                "symbol": quote.symbol.replace("260904", "260903"),
+                "expiration": expiration,
+                "observed_at": now,
+            }
+        )
+        for quote in chain
+    ]
+
+    report = build_candidates([snapshot], {"IWM": same_day_chain}, now)
+    candidate = only_directional_candidate(report)
+
+    assert candidate.structure.expiration == expiration
+    assert candidate.candidate_id.startswith("iwm-call_debit_spread-20260903-")
+    assert all(leg.expiration == expiration for leg in candidate.structure.legs)
+    assert all("260903" in leg.symbol for leg in candidate.structure.legs)
+
+
+@pytest.mark.asyncio
 async def test_directional_candidate_uses_event_safe_window_not_six_hour_condor_horizon(
     replay_adapter,
 ) -> None:

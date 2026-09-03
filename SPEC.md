@@ -374,8 +374,17 @@ Competition limits:
 - No market orders for multi-leg entries or exits under normal operation.
 - No quantity increase after an adverse move.
 - Competition directional debit spreads take profit when fresh executable closing quotes reach
-  1.08 times opening debit. Other debit strategies retain the 1.50 multiple, credit strategies
+  1.35 times opening debit. Other debit strategies retain the 1.50 multiple, credit strategies
   retain their separate exit policy, and the directional 0.65 premium-value stop is unchanged.
+- The final-day target scenario assumes two independently qualifying high-conviction debit
+  spreads near $5,954.59 each. Two 35% exits are about +$4,168 gross before slippage; one winner
+  and one symmetric 35% stopped loser are approximately flat. Two stops are about -$4,168 before
+  slippage. If both positions lose their entire debit before exits fill, the 12% index-cluster
+  ceiling is about $11,909 at the $99,243.24 starting equity; the absolute 15% portfolio ceiling
+  is about $14,886. The 6% daily stop blocks subsequent entries and invokes risk handling, but it
+  cannot guarantee a 6% terminal loss after 12% of defined risk is already open. Wednesday's
+  observed premium gains of about 10.5% and 7.8% are weak evidence: Thursday 0DTE gamma makes a
+  35% gain possible, not probable or guaranteed.
 - No new entries during close-only state.
 
 Risk decisions return machine-readable reason codes. A rejected intent remains visible on the dashboard.

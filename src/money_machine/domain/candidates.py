@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
+from money_machine.domain.clock import NEW_YORK
 from money_machine.domain.enums import Action, OptionRight, PositionIntent, Side
 from money_machine.domain.events import directional_event_window, scheduled_macro_event_risk
 from money_machine.domain.options import MULTIPLIER, calculate_maximum_loss
@@ -274,8 +275,12 @@ def _fresh_expiry_groups(
     chain: list[OptionQuote], now: datetime
 ) -> dict[datetime, list[OptionQuote]]:
     grouped: dict[datetime, list[OptionQuote]] = defaultdict(list)
+    trading_date = now.astimezone(NEW_YORK).date()
     for quote in chain:
-        if quote.expiration <= now or _age_seconds(now, quote.observed_at) > MAX_QUOTE_AGE_SECONDS:
+        if (
+            quote.expiration.date() < trading_date
+            or _age_seconds(now, quote.observed_at) > MAX_QUOTE_AGE_SECONDS
+        ):
             continue
         grouped[quote.expiration].append(quote)
     return dict(grouped)

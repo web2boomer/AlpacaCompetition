@@ -67,7 +67,9 @@ backoff, while urgent safety exits retain aggressive bounded concessions.
 On the final competition day, the 08:30 ET Productivity/international-trade release retains a
 75-minute fail-closed cooldown, making 09:45 ET the earliest possible entry. Directional debit
 spreads require the existing two-cycle post-open confirmation and use an executable-quote
-take-profit at 1.08 times opening debit; their 0.65 premium-value stop and 60-minute cap remain.
+take-profit at 1.35 times the broker-confirmed opening debit; their 0.65 premium-value stop and
+60-minute cap remain. Same-day contracts remain eligible throughout their New York expiration
+date; expired prior-date contracts remain excluded.
 
 During the final September 2–3 competition recovery window, the production selector is
 directional-only for new entries. Condors remain in the complete candidate report for audit and

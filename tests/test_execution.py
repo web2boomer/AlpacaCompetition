@@ -182,6 +182,7 @@ def test_directional_debit_take_profit_and_stop_are_executable_quote_driven(
 def test_competition_directional_debit_take_profit_boundary(
     directional_candidate, offset: Decimal, should_close: bool
 ) -> None:
+    assert Decimal("1.35") == COMPETITION_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE
     opened_at = datetime(2026, 9, 3, 14, tzinfo=UTC)
     managed = _managed(directional_candidate, opened_at=opened_at)
     long_leg = next(leg for leg in managed.structure.legs if leg.side.value == "buy")
