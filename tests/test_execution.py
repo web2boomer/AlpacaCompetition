@@ -404,17 +404,17 @@ def test_daily_deadline_is_dst_aware_and_final_hour_flatten_is_earlier() -> None
     assert daily_hard_exit_deadline(datetime(2026, 7, 1, 14, tzinfo=UTC)).hour == 19
     assert daily_hard_exit_deadline(datetime(2026, 1, 5, 15, tzinfo=UTC)).hour == 20
     thursday = entry_holding_policy(datetime(2026, 9, 3, 19, 0, tzinfo=UTC), 120)
-    assert thursday.effective_deadline == datetime(2026, 9, 3, 19, 35, tzinfo=UTC)
+    assert thursday.effective_deadline == datetime(2026, 9, 3, 19, 50, tzinfo=UTC)
     assert thursday.accepted
 
 
-def test_final_hour_exact_1520_entry_has_fifteen_minute_managed_window() -> None:
-    exact = entry_holding_policy(datetime(2026, 9, 3, 19, 20, tzinfo=UTC), 45)
-    late = entry_holding_policy(datetime(2026, 9, 3, 19, 20, 1, tzinfo=UTC), 45)
+def test_final_window_exact_1545_entry_has_five_minute_managed_window() -> None:
+    exact = entry_holding_policy(datetime(2026, 9, 3, 19, 45, tzinfo=UTC), 45)
+    late = entry_holding_policy(datetime(2026, 9, 3, 19, 45, 1, tzinfo=UTC), 45)
 
     assert exact.accepted
-    assert exact.effective_holding_minutes == 15
-    assert exact.effective_deadline == datetime(2026, 9, 3, 19, 35, tzinfo=UTC)
+    assert exact.effective_holding_minutes == 5
+    assert exact.effective_deadline == datetime(2026, 9, 3, 19, 50, tzinfo=UTC)
     assert not late.accepted
 
 

@@ -11,9 +11,9 @@ SCORING_STARTS_AT = datetime(2026, 8, 31, 13, 30, tzinfo=UTC)
 # Backwards-compatible name for the start of trading authority.
 STARTS_AT = SCORING_STARTS_AT
 FINAL_HOUR_RECOVERY_STARTS_AT = datetime(2026, 9, 3, 19, 0, tzinfo=UTC)
-NEW_ENTRY_CUTOFF = datetime(2026, 9, 3, 19, 20, tzinfo=UTC)
-FORCED_FLATTEN_STARTS_AT = datetime(2026, 9, 3, 19, 35, tzinfo=UTC)
-FLAT_TARGET_AT = datetime(2026, 9, 3, 19, 50, tzinfo=UTC)
+NEW_ENTRY_CUTOFF = datetime(2026, 9, 3, 19, 45, tzinfo=UTC)
+FORCED_FLATTEN_STARTS_AT = datetime(2026, 9, 3, 19, 50, tzinfo=UTC)
+FLAT_TARGET_AT = datetime(2026, 9, 3, 19, 57, tzinfo=UTC)
 EOD_EQUITY_SNAPSHOT_AT = datetime(2026, 9, 3, 20, 0, tzinfo=UTC)
 ENDS_AT = datetime(2026, 9, 4, 13, 30, tzinfo=UTC)
 BASELINE_EQUITY = Decimal("100000.00")
@@ -23,6 +23,7 @@ MarketSessionPhase = Literal["market_hours", "extended_hours", "overnight"]
 NEW_YORK = ZoneInfo("America/New_York")
 DAILY_ENTRY_START_TIME = time(9, 45)
 DAILY_ENTRY_CUTOFF_TIME = time(15, 20)
+FINAL_DAY_ENTRY_CUTOFF_TIME = time(15, 45)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,7 +82,9 @@ def competition_entry_window_open(at: datetime) -> bool:
     wall_time = local.time().replace(tzinfo=None)
     final_day = local.date() == EOD_EQUITY_SNAPSHOT_AT.astimezone(NEW_YORK).date()
     before_cutoff = (
-        wall_time <= DAILY_ENTRY_CUTOFF_TIME if final_day else wall_time < DAILY_ENTRY_CUTOFF_TIME
+        wall_time <= FINAL_DAY_ENTRY_CUTOFF_TIME
+        if final_day
+        else wall_time < DAILY_ENTRY_CUTOFF_TIME
     )
     return local.weekday() < 5 and wall_time >= DAILY_ENTRY_START_TIME and before_cutoff
 

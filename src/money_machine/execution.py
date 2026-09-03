@@ -95,7 +95,7 @@ class EntryHoldingPolicy:
 
 DAILY_HARD_EXIT_TIME = time(15, 50)
 MINIMUM_ENTRY_WINDOW = timedelta(minutes=30)
-FINAL_HOUR_MINIMUM_ENTRY_WINDOW = timedelta(minutes=15)
+FINAL_HOUR_MINIMUM_ENTRY_WINDOW = timedelta(minutes=5)
 
 
 def daily_hard_exit_deadline(at: datetime) -> datetime:

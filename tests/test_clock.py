@@ -38,7 +38,7 @@ def test_state_one_second_before_at_and_after_each_transition(
     assert after.state is at_state
 
 
-def test_final_hour_entry_cutoff_includes_exact_1520_boundary() -> None:
+def test_final_window_entry_cutoff_includes_exact_1545_boundary() -> None:
     assert (
         competition_clock(NEW_ENTRY_CUTOFF - timedelta(seconds=1), has_exposure=False).state
         is ExecutionState.FULL_EXECUTION
@@ -145,7 +145,7 @@ def test_market_session_phase(moment, phase) -> None:
         (datetime(2026, 9, 2, 19, 15, tzinfo=UTC), True),
         (datetime(2026, 9, 2, 19, 19, 59, tzinfo=UTC), True),
         (datetime(2026, 9, 2, 19, 20, tzinfo=UTC), False),
-        (datetime(2026, 9, 3, 19, 20, tzinfo=UTC), True),
+        (datetime(2026, 9, 3, 19, 35, tzinfo=UTC), True),
         (datetime(2026, 9, 2, 19, 50, tzinfo=UTC), False),
         (datetime(2026, 9, 5, 14, 0, tzinfo=UTC), False),
     ],

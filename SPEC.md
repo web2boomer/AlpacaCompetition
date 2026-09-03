@@ -203,7 +203,7 @@ from forced-liquidation start until Alpaca positions and relevant working orders
 
 For the September 2 recovery window, new production entries are considered only from 09:45 ET
 inclusive to 15:20 ET exclusive. The 2026-09-03 final-hour mandate supersedes Thursday's earlier
-14:30 cutoff and admits the exact 15:20 scheduler boundary before close-only begins.
+14:30 cutoff and admits the exact 15:45 scheduler boundary before close-only begins.
 New-entry auction input is limited to SPY/QQQ/IWM call and put
 debit spreads. Index condors continue to be compiled and persisted for Decision Passport and
 counterfactual evidence, but carry the explicit `competition_directional_only_policy` exclusion and
@@ -404,14 +404,16 @@ Competition limits:
   lifecycle, and established structures close atomically through the normal exit path. The trigger,
   current equity, latched peak, source, and expiry are recorded in every Decision Passport. It is
   date-bounded to 2026-09-03 and cannot activate from an unreconciled mark.
-- From 15:00 through the exact 15:20 ET boundary on 2026-09-03 only, one independently validated
+- From 15:00 through the exact 15:45 ET boundary on 2026-09-03 only, independently validated
   high-conviction SPY/QQQ/IWM directional debit spread may use the remaining headroom under both
   24% defined-loss caps. Existing defined loss consumes that headroom. Quantity is floored by
   per-contract maximum loss and capped by displayed executable depth on every opening leg. The
   tier requires the normal exact-ID, two-cycle direction, confidence, reward/risk, data, liquidity,
-  event, reconciliation, pending-order, account, and atomic-MLEG gates; it is unavailable after one
-  final-hour entry submission. Its hold is clamped to 15:35 ET, with a minimum 15-minute tradable
-  window at the 15:20 boundary. Forced flatten begins at 15:35 and the flat target is 15:50.
+  event, reconciliation, pending-order, account, and atomic-MLEG gates. There is no fixed final-
+  window entry count; each ordinary cycle may submit at most one eligible atomic entry, sized only
+  from live remaining headroom. Each hold is clamped to 15:50 ET, with a minimum five-minute
+  tradable window at the exact 15:45 boundary. Forced flatten begins at 15:50 and the flat target
+  is 15:57.
 - On Thursday only, one fresh high-conviction SPY/QQQ/IWM directional debit spread may use up to
   12% of current equity, never exceeding the existing 12% index-cluster cap and only while the
   cluster is flat. It requires every normal hard gate plus at least 0.10 percentage point of

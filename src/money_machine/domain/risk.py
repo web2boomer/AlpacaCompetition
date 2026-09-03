@@ -235,18 +235,7 @@ def evaluate_risk(
     )
     tier_thresholds_met = condor_tier_thresholds_met or directional_tier_thresholds_met
     final_hour_window = FINAL_HOUR_RECOVERY_STARTS_AT <= context.now <= NEW_ENTRY_CUTOFF
-    final_hour_eligible = (
-        final_hour_window
-        and directional_tier_thresholds_met
-        and not context.final_hour_entry_already_used
-    )
-    add(
-        "final_hour_one_shot",
-        not final_hour_window or not context.final_hour_entry_already_used,
-        context.final_hour_entry_already_used,
-        False,
-        RiskReason.OPEN_STRUCTURE_LIMIT,
-    )
+    final_hour_eligible = final_hour_window and directional_tier_thresholds_met
     add(
         "final_hour_candidate_quality",
         not final_hour_window or directional_tier_thresholds_met,
@@ -381,12 +370,14 @@ def evaluate_risk(
         True,
         (
             f"applied={str(final_hour_applied).lower()}; window={str(final_hour_window).lower()}; "
-            f"one_shot_already_used={str(context.final_hour_entry_already_used).lower()}; "
             f"directional_high_conviction={str(directional_tier_thresholds_met).lower()}; "
             f"remaining_cluster_headroom={cluster_remaining}; "
             f"remaining_total_headroom={total_remaining}"
         ),
-        "2026-09-03 15:00-15:20 ET; one high-conviction directional; remaining 24% headroom",
+        (
+            "2026-09-03 15:00-15:45 ET; at most one eligible entry per ordinary cycle; "
+            "size from remaining 24% headroom"
+        ),
         RiskReason.PER_STRUCTURE_CAP,
     )
     add(

@@ -148,7 +148,7 @@ async def run_production_acceptance(
                 ).state
                 acceptance_window = (
                     clock_state in {ExecutionState.OBSERVE_ONLY, ExecutionState.FULL_EXECUTION}
-                    and observed_at < NEW_ENTRY_CUTOFF
+                    and observed_at <= NEW_ENTRY_CUTOFF
                 )
                 add(
                     "competition_clock",

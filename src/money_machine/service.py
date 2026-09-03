@@ -1457,7 +1457,17 @@ def _directional_policy_exclusions(
             else None
         )
         post_stop_reason = None
-        if stop is not None and (reset_at is None or prior is None or reset_at > prior.cycle_at):
+        fresh_post_stop_confirmation = bool(
+            stop is not None
+            and prior is not None
+            and prior.cycle_at > stop.stopped_at
+            and confirmation_reason is None
+        )
+        if (
+            stop is not None
+            and not fresh_post_stop_confirmation
+            and (reset_at is None or prior is None or reset_at > prior.cycle_at)
+        ):
             post_stop_reason = "post_stop_signal_reset_and_reconfirmation_required"
         previous_trend = prior.snapshot.trend_return_pct if prior and prior.snapshot else None
         trend_acceleration = (
@@ -1516,6 +1526,7 @@ def _directional_policy_exclusions(
             "previous_validation_error": prior.validation_error if prior else None,
             "latest_identical_setup_stop_at": stop.stopped_at.isoformat() if stop else None,
             "post_stop_signal_reset_at": reset_at.isoformat() if reset_at else None,
+            "fresh_post_stop_two_cycle_confirmation": fresh_post_stop_confirmation,
             "post_stop_reset_and_reconfirmation_passed": post_stop_reason is None,
             "trend_acceleration": (
                 str(trend_acceleration) if trend_acceleration is not None else None

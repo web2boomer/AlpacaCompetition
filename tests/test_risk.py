@@ -205,7 +205,10 @@ async def test_final_hour_quantity_is_capped_by_full_leg_depth(replay_candidate)
     result = evaluate_risk(
         decision(candidate, confidence=0.80, maximum_holding_minutes=20),
         candidate,
-        context(now="2026-09-03T19:15:00Z", equity=Decimal("86000")),
+        context(
+            now="2026-09-03T19:15:00Z",
+            equity=Decimal("86000"),
+        ),
     )
 
     assert result.approved
@@ -227,7 +230,10 @@ async def test_final_hour_missing_displayed_depth_fails_closed(replay_candidate)
     result = evaluate_risk(
         decision(candidate, confidence=0.80, maximum_holding_minutes=20),
         candidate,
-        context(now="2026-09-03T19:15:00Z", equity=Decimal("86000")),
+        context(
+            now="2026-09-03T19:15:00Z",
+            equity=Decimal("86000"),
+        ),
     )
 
     assert not result.approved
@@ -236,7 +242,7 @@ async def test_final_hour_missing_displayed_depth_fails_closed(replay_candidate)
 
 
 @pytest.mark.asyncio
-async def test_final_hour_rejects_second_entry_and_non_high_conviction(replay_candidate) -> None:
+async def test_final_hour_rejects_non_high_conviction(replay_candidate) -> None:
     candidate = directional_candidate(replay_candidate)
     legs = tuple(
         leg.model_copy(update={"bid_size": 300, "ask_size": 300})
@@ -245,22 +251,12 @@ async def test_final_hour_rejects_second_entry_and_non_high_conviction(replay_ca
     candidate = candidate.model_copy(
         update={"structure": candidate.structure.model_copy(update={"legs": legs})}
     )
-    used = evaluate_risk(
-        decision(candidate, confidence=0.80, maximum_holding_minutes=20),
-        candidate,
-        context(
-            now="2026-09-03T19:15:00Z",
-            final_hour_entry_already_used=True,
-        ),
-    )
     weak = evaluate_risk(
         decision(candidate, confidence=0.79, maximum_holding_minutes=20),
         candidate,
         context(now="2026-09-03T19:15:00Z"),
     )
 
-    assert not used.approved
-    assert not check(used, "final_hour_one_shot").passed
     assert not weak.approved
     assert not check(weak, "final_hour_candidate_quality").passed
 

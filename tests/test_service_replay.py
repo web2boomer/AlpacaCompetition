@@ -595,16 +595,16 @@ async def test_rotation_excludes_stagnant_setup_and_selects_alternative_underlyi
 
 
 @pytest.mark.asyncio
-async def test_debit_stop_requires_visible_reset_then_two_cycle_reconfirmation(
+async def test_debit_stop_requires_fresh_two_cycle_reconfirmation(
     repository, replay_adapter, directional_candidate, monkeypatch
 ) -> None:
     now = replay_adapter.observed_at
     current = await replay_adapter.underlying_snapshot(directional_candidate.structure.underlying)
     current = current.model_copy(update={"observed_at": now})
-    prior_snapshot = current.model_copy(update={"observed_at": now - timedelta(minutes=5)})
+    prior_snapshot = current.model_copy(update={"observed_at": now - timedelta(minutes=20)})
     prior = PriorMarketObservation(
-        cycle_at=now - timedelta(minutes=5),
-        observed_at=now - timedelta(minutes=5),
+        cycle_at=now - timedelta(minutes=20),
+        observed_at=now - timedelta(minutes=20),
         snapshot=prior_snapshot,
     )
     stop = DirectionalStopRecord(
@@ -632,11 +632,12 @@ async def test_debit_stop_requires_visible_reset_then_two_cycle_reconfirmation(
         "post_stop_reset_and_reconfirmation_passed"
     ]
 
-    monkeypatch.setattr(
-        repository,
-        "directional_signal_reset_at",
-        lambda **_kwargs: now - timedelta(minutes=10),
+    fresh_prior = PriorMarketObservation(
+        cycle_at=now - timedelta(minutes=5),
+        observed_at=now - timedelta(minutes=5),
+        snapshot=current.model_copy(update={"observed_at": now - timedelta(minutes=5)}),
     )
+    monkeypatch.setattr(repository, "prior_market_observation", lambda **_kwargs: fresh_prior)
     allowed, refreshed = _directional_policy_exclusions(
         (directional_candidate,),
         snapshots=[current],
