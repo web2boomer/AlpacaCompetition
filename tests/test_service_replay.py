@@ -15,7 +15,7 @@ from money_machine.domain.clock import (
 )
 from money_machine.domain.daily_loss import loss_is_plausible, validate_managed_book_marks
 from money_machine.domain.enums import Action, RunMode
-from money_machine.domain.schemas import AccountSnapshot, BrokerOrderRequest, BrokerOrderResult
+from money_machine.domain.schemas import AccountSnapshot
 from money_machine.model_provider import ReplayModelProvider
 from money_machine.persistence.models import (
     AgentRunORM,
@@ -139,44 +139,6 @@ def test_thursday_daily_loss_baseline_is_first_clean_mark_and_never_resets(repos
     assert summary["start_of_day_equity"] == Decimal("99243.24")
     assert summary["start_of_day_equity"] * Decimal("0.06") == Decimal("5954.5944")
     assert summary["start_of_day_equity"] - Decimal("95998.10") == Decimal("3245.14")
-
-
-def test_maverick_submission_is_persisted_and_consumes_the_daily_one_shot(
-    repository, directional_candidate
-) -> None:
-    now = datetime(2026, 9, 3, 14, tzinfo=UTC)
-    run_id, created = repository.begin_run("maverick-persistence", RunMode.REPLAY, now)
-    assert created
-    request = BrokerOrderRequest(
-        client_order_id="mm-comp-maverick-once",
-        candidate_id=directional_candidate.candidate_id,
-        quantity=1,
-        limit_price=directional_candidate.structure.net_price,
-        is_credit=False,
-        legs=directional_candidate.structure.legs,
-        environment_role="competition",
-        take_profit_multiple=Decimal("1.70"),
-    )
-    repository.persist_order(
-        run_id,
-        request,
-        BrokerOrderResult(
-            broker_order_id="broker-maverick-once",
-            client_order_id=request.client_order_id,
-            status="accepted",
-            submitted_at=now,
-            raw={"status": "accepted"},
-        ),
-    )
-
-    assert repository.maverick_entry_used(now=now)
-    assert not repository.maverick_entry_used(now=now + timedelta(days=1))
-    with repository.database.session() as session:
-        persisted = session.scalar(
-            select(BrokerOrderORM).where(BrokerOrderORM.client_order_id == request.client_order_id)
-        )
-        assert persisted is not None
-        assert persisted.raw_json["request"]["take_profit_multiple"] == "1.70"
 
 
 async def seed_managed_position(settings, repository, replay_adapter, *, quantity: str = "1"):
@@ -577,47 +539,6 @@ async def test_debit_stop_requires_visible_reset_then_two_cycle_reconfirmation(
         now=now,
     )
     assert opposite.candidate_id not in opposite_exclusions
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("prior_trend", "confirmed"),
-    [(Decimal("0.0051"), False), (Decimal("0.0050"), True)],
-)
-async def test_maverick_acceleration_boundary_is_exact_and_audited(
-    repository, replay_adapter, directional_candidate, monkeypatch, prior_trend, confirmed
-) -> None:
-    now = replay_adapter.observed_at
-    symbol = directional_candidate.structure.underlying
-    current = await replay_adapter.underlying_snapshot(symbol)
-    current = current.model_copy(update={"observed_at": now, "trend_return_pct": Decimal("0.0060")})
-    prior_snapshot = current.model_copy(
-        update={
-            "observed_at": now - timedelta(minutes=5),
-            "trend_return_pct": prior_trend,
-        }
-    )
-    prior = PriorMarketObservation(
-        cycle_at=now - timedelta(minutes=5),
-        observed_at=now - timedelta(minutes=5),
-        snapshot=prior_snapshot,
-    )
-    monkeypatch.setattr(repository, "prior_market_observation", lambda **_kwargs: prior)
-    monkeypatch.setattr(repository, "latest_directional_stop", lambda **_kwargs: None)
-
-    exclusions, evidence = _directional_policy_exclusions(
-        (directional_candidate,),
-        snapshots=[current],
-        repository=repository,
-        run_id="current-run",
-        mode=RunMode.REPLAY,
-        now=now,
-    )
-
-    item = evidence[directional_candidate.candidate_id]
-    assert directional_candidate.candidate_id not in exclusions
-    assert item["maverick_signal_confirmed"] is confirmed
-    assert Decimal(item["trend_acceleration"]) == abs(current.trend_return_pct) - abs(prior_trend)
 
 
 def live_style_risk_summary(*, open_underlyings, pending_underlyings=frozenset()):

@@ -1,6 +1,5 @@
 from decimal import ROUND_FLOOR, Decimal
 
-from money_machine.domain.clock import EOD_EQUITY_SNAPSHOT_AT, NEW_YORK
 from money_machine.domain.enums import Action, ExecutionState, RiskReason
 from money_machine.domain.options import validate_defined_risk
 from money_machine.domain.schemas import (
@@ -14,7 +13,6 @@ from money_machine.execution import entry_holding_policy
 
 INDEX_PER_STRUCTURE_PCT = Decimal("0.03")
 HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT = Decimal("0.06")
-MAVERICK_INDEX_PER_STRUCTURE_PCT = Decimal("0.12")
 EARNINGS_PER_STRUCTURE_PCT = Decimal("0.0035")
 HIGH_CONVICTION_MIN_CONFIDENCE = Decimal("0.80")
 HIGH_CONVICTION_MIN_RICHNESS_RATIO = Decimal("1.50")
@@ -251,19 +249,6 @@ def evaluate_risk(
     tier_thresholds_met = condor_tier_thresholds_met or directional_tier_thresholds_met
     hard_gates_passed = all(check.passed for check in checks)
     high_conviction_applied = tier_thresholds_met and hard_gates_passed
-    final_competition_day = (
-        context.now.astimezone(NEW_YORK).date()
-        == EOD_EQUITY_SNAPSHOT_AT.astimezone(NEW_YORK).date()
-    )
-    maverick_signal_confirmed = candidate.candidate_id in context.maverick_candidate_ids
-    maverick_applied = (
-        directional_tier_thresholds_met
-        and hard_gates_passed
-        and final_competition_day
-        and maverick_signal_confirmed
-        and not context.maverick_entry_already_used
-        and context.index_cluster_defined_loss == 0
-    )
     qualification_path = (
         "condor"
         if candidate.action is Action.INDEX_CONDOR
@@ -282,9 +267,6 @@ def evaluate_risk(
     if candidate.action is Action.EARNINGS_CONDOR:
         per_pct = EARNINGS_PER_STRUCTURE_PCT
         tier_name = "earnings"
-    elif maverick_applied:
-        per_pct = MAVERICK_INDEX_PER_STRUCTURE_PCT
-        tier_name = "maverick_directional"
     elif high_conviction_applied:
         per_pct = HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT
         tier_name = "high_conviction_index"
@@ -292,23 +274,6 @@ def evaluate_risk(
         per_pct = INDEX_PER_STRUCTURE_PCT
         tier_name = "standard_index"
     per_budget = context.equity * per_pct
-    add(
-        "maverick_final_day_tier",
-        True,
-        (
-            f"applied={str(maverick_applied).lower()}; "
-            f"final_competition_day={str(final_competition_day).lower()}; "
-            f"fresh_acceleration_or_reset_reversal={str(maverick_signal_confirmed).lower()}; "
-            f"one_shot_already_used={str(context.maverick_entry_already_used).lower()}; "
-            f"directional_high_conviction={str(directional_tier_thresholds_met).lower()}; "
-            f"existing_index_defined_loss={context.index_cluster_defined_loss}"
-        ),
-        (
-            "final day; qualifying high-conviction directional; fresh 5-minute acceleration "
-            "or reset-and-reconfirmed reversal; existing index defined loss=0"
-        ),
-        RiskReason.PER_STRUCTURE_CAP,
-    )
     add(
         "high_conviction_index_tier",
         True,
@@ -342,7 +307,6 @@ def evaluate_risk(
         (
             f"standard_index={INDEX_PER_STRUCTURE_PCT}; "
             f"high_conviction_index={HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT}; "
-            f"maverick_directional={MAVERICK_INDEX_PER_STRUCTURE_PCT}; "
             f"earnings={EARNINGS_PER_STRUCTURE_PCT}"
         ),
         RiskReason.PER_STRUCTURE_CAP,

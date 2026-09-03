@@ -80,12 +80,6 @@ The persisted strategy-rotation evidence carries a flat/no-entry start time and 
 progress between Passports. At 45 minutes the current underlying/direction is not silently retried;
 the selector admits only independently gated alternatives. A debit-stop setup is locked out until
 a durable neutral/opposite observation resets it and two later cycles reconfirm the direction.
-On Thursday only, the audited Maverick tier can allocate one high-conviction directional debit
-spread up to the existing 12% index-cluster cap when that cluster is flat. Eligibility adds fresh
-five-minute absolute-trend acceleration of at least 0.10 percentage point, or a reset followed by
-a reconfirmed reversal, to every existing directional hard gate. The submitted order persists its
-1.70-times take-profit override so lifecycle restarts retain the same exit authority. The first
-submission consumes the one-shot for the New York session; no second proxy bet can qualify.
 Production entry authority is additionally restricted to 09:45–15:20 ET, while Thursday retains
 the immutable 14:30 ET competition cutoff. These selector controls do
 not weaken reconciliation or lifecycle ownership of previously established structures.

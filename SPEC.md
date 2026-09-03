@@ -386,15 +386,6 @@ Competition limits:
   after a trade, exit, or return to flat. Each Passport reports the running loss even below the
   latch. At the $99,243.24 Thursday start, the unchanged 6% stop is $5,954.59 (approximately
   $6,000) and blocks further entries at about $93,288.65 after confirmation.
-- On Thursday only, one fresh high-conviction SPY/QQQ/IWM directional debit spread may use the
-  existing 12% index-cluster budget when the index cluster is flat. It requires the normal
-  confidence, trend, reward/risk, debit/width, liquidity, data, event, account, reconciliation and
-  direction-confirmation gates plus at least 0.10 percentage point of five-minute absolute-trend
-  acceleration, or a persisted reset followed by a reconfirmed reversal. The one-shot order uses
-  a persisted 1.70-times debit target, the unchanged 0.65 premium stop and the 45-minute cap.
-  Any prior Maverick submission that day or any existing correlated index exposure disables the
-  tier; qualifying trades then fall back to the ordinary deterministic cap rather than bypassing
-  risk controls.
 - The final-day target scenario assumes two independently qualifying high-conviction debit
   spreads near $5,954.59 each. Two 35% exits are about +$4,168 gross before slippage; one winner
   and one symmetric 35% stopped loser are approximately flat. Two stops are about -$4,168 before
