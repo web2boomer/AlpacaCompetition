@@ -10,7 +10,7 @@ HACKATHON_STARTS_AT = datetime(2026, 8, 28, 13, 30, tzinfo=UTC)
 SCORING_STARTS_AT = datetime(2026, 8, 31, 13, 30, tzinfo=UTC)
 # Backwards-compatible name for the start of trading authority.
 STARTS_AT = SCORING_STARTS_AT
-NEW_ENTRY_CUTOFF = datetime(2026, 9, 3, 18, 30, tzinfo=UTC)
+NEW_ENTRY_CUTOFF = datetime(2026, 9, 3, 19, 15, tzinfo=UTC)
 FORCED_FLATTEN_STARTS_AT = datetime(2026, 9, 3, 19, 15, tzinfo=UTC)
 FLAT_TARGET_AT = datetime(2026, 9, 3, 19, 45, tzinfo=UTC)
 EOD_EQUITY_SNAPSHOT_AT = datetime(2026, 9, 3, 20, 0, tzinfo=UTC)

@@ -57,6 +57,7 @@ unreconciled mark and does not apply on another date.
 
 This authorization never weakens the official-account and paper-only guards, atomic defined-risk
 MLEG requirement, deterministic caps, reconciliation, liquidity, data, event, lifecycle,
-idempotency, the one-additional-structure ceiling, 14:30 entry cutoff, 15:15 forced flatten, 15:45
-flat target, 16:00 equity lock, or emergency controls. Agents must not invent an additional
+idempotency, the one-additional-structure ceiling, deterministic minimum 30-minute holding window,
+15:15 forced flatten and entry-authority cutoff, 15:45 flat target, 16:00 equity lock, or emergency
+controls. Agents must not invent an additional
 approval pause when those deterministic gates pass, and must not add risk beyond their limits.

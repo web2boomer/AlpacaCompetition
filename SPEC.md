@@ -202,7 +202,10 @@ The regular market-hours loop runs every five minutes and increases to approxima
 from forced-liquidation start until Alpaca positions and relevant working orders confirm flat.
 
 For the September 2 recovery window, new production entries are considered only from 09:45 ET
-inclusive to 15:20 ET exclusive; Thursday retains the immutable 14:30 ET competition cutoff.
+inclusive to 15:20 ET exclusive. On the final Thursday, clock authority remains open until the
+15:15 ET forced-flatten boundary, but the deterministic holding-window gate admits a candidate only
+when at least 30 minutes remain before that boundary. Consequently the 14:45 ET cycle is the last
+possible entry cycle and later candidates fail closed without weakening any other gate.
 New-entry auction input is limited to SPY/QQQ/IWM call and put
 debit spreads. Index condors continue to be compiled and persisted for Decision Passport and
 counterfactual evidence, but carry the explicit `competition_directional_only_policy` exclusion and

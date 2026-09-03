@@ -408,6 +408,17 @@ def test_daily_deadline_is_dst_aware_and_thursday_flatten_is_earlier() -> None:
     assert not thursday.accepted
 
 
+def test_final_day_extended_entry_window_uses_remaining_holding_time() -> None:
+    last_accepted_cycle = entry_holding_policy(datetime(2026, 9, 3, 18, 45, tzinfo=UTC), 45)
+    rejected_cycle = entry_holding_policy(datetime(2026, 9, 3, 18, 50, tzinfo=UTC), 45)
+
+    assert last_accepted_cycle.accepted
+    assert last_accepted_cycle.effective_holding_minutes == 30
+    assert last_accepted_cycle.effective_deadline == datetime(2026, 9, 3, 19, 15, tzinfo=UTC)
+    assert not rejected_cycle.accepted
+    assert rejected_cycle.reason == "insufficient_tradable_session_window"
+
+
 def test_soft_close_backs_off_without_quote_change_but_urgent_exit_cancels() -> None:
     submitted = datetime(2026, 9, 1, 14, tzinfo=UTC)
     soft = stale_order_action(
