@@ -472,6 +472,26 @@ class AuditRepository:
             )
             return bool(count and count > 0)
 
+    def maverick_entry_used(self, *, now: datetime) -> bool:
+        """Return whether today's one-shot competition directional tier was submitted."""
+        local_date = now.astimezone(NEW_YORK).date()
+        with self.database.session() as session:
+            orders = session.scalars(
+                select(BrokerOrderORM).where(
+                    BrokerOrderORM.environment_role == "competition",
+                    BrokerOrderORM.submitted_at.is_not(None),
+                )
+            )
+            for order in orders:
+                if _safe_datetime(order.submitted_at).astimezone(NEW_YORK).date() != local_date:
+                    continue
+                request = order.raw_json.get("request", {})
+                if not isinstance(request, dict) or request.get("is_closing", False):
+                    continue
+                if str(request.get("take_profit_multiple")) == "2.10":
+                    return True
+        return False
+
     def persist_order(
         self,
         run_id: str,
@@ -500,6 +520,11 @@ class AuditRepository:
                             "parent_client_order_id": request.parent_client_order_id,
                             "exit_reason": request.exit_reason,
                             "exit_urgency": request.exit_urgency,
+                            "take_profit_multiple": (
+                                str(request.take_profit_multiple)
+                                if request.take_profit_multiple is not None
+                                else None
+                            ),
                             "legs": [leg.model_dump(mode="json") for leg in request.legs],
                         },
                     },
@@ -783,6 +808,11 @@ class AuditRepository:
                             maximum_loss=structure.maximum_loss,
                             maximum_profit=structure.maximum_profit,
                             is_credit=structure.is_credit,
+                        ),
+                        take_profit_multiple=(
+                            Decimal(str(request["take_profit_multiple"]))
+                            if request.get("take_profit_multiple") is not None
+                            else None
                         ),
                     )
                 )

@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -13,6 +14,7 @@ from money_machine.domain.risk import (
     COMPETITION_DRAWDOWN_PCT,
     DAILY_LOSS_PCT,
     EARNINGS_PER_STRUCTURE_PCT,
+    FINAL_DAY_DAILY_LOSS_PCT,
     HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT,
     HIGH_CONVICTION_MAX_DEBIT_TO_WIDTH_RATIO,
     HIGH_CONVICTION_MIN_CONDOR_REWARD_RISK_RATIO,
@@ -22,7 +24,9 @@ from money_machine.domain.risk import (
     HIGH_CONVICTION_MIN_RICHNESS_RATIO,
     INDEX_CLUSTER_PCT,
     INDEX_PER_STRUCTURE_PCT,
+    MAVERICK_INDEX_PER_STRUCTURE_PCT,
     TOTAL_DEFINED_LOSS_PCT,
+    daily_loss_pct_at,
     evaluate_risk,
 )
 from money_machine.domain.schemas import Candidate, ModelDecision, OptionStructure, RiskContext
@@ -353,7 +357,77 @@ def test_competition_risk_policy_constants_are_fixed() -> None:
     assert Decimal("0.12") == INDEX_CLUSTER_PCT
     assert Decimal("0.15") == TOTAL_DEFINED_LOSS_PCT
     assert Decimal("0.06") == DAILY_LOSS_PCT
+    assert Decimal("0.11") == FINAL_DAY_DAILY_LOSS_PCT
+    assert Decimal("0.12") == MAVERICK_INDEX_PER_STRUCTURE_PCT
     assert Decimal("0.12") == COMPETITION_DRAWDOWN_PCT
+
+
+def test_daily_loss_boundary_is_eleven_percent_only_on_final_day() -> None:
+    assert daily_loss_pct_at(datetime(2026, 9, 3, 14, tzinfo=UTC)) == Decimal("0.11")
+    assert daily_loss_pct_at(datetime(2026, 9, 2, 14, tzinfo=UTC)) == Decimal("0.06")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("equity", "approved"),
+    [(Decimal("88326.49"), True), (Decimal("88326.4836"), False)],
+)
+async def test_final_day_daily_loss_boundary_is_exact(replay_candidate, equity, approved) -> None:
+    result = evaluate_risk(
+        decision(replay_candidate),
+        replay_candidate,
+        context(
+            now="2026-09-03T14:00:00Z",
+            equity=equity,
+            start_of_day_equity=Decimal("99243.24"),
+            peak_equity=equity,
+        ),
+    )
+
+    assert check(result, "daily_loss").passed is approved
+    assert check(result, "daily_loss").limit == "10916.7564"
+
+
+@pytest.mark.asyncio
+async def test_maverick_final_day_is_one_shot_flat_cluster_and_twelve_percent(
+    replay_candidate,
+) -> None:
+    candidate = directional_candidate(
+        replay_candidate,
+        trend_strength=Decimal("0.006"),
+        debit=Decimal("1.00"),
+        maximum_profit=Decimal("200.00"),
+    )
+    eligible = evaluate_risk(
+        decision(candidate, confidence=0.80),
+        candidate,
+        context(
+            now="2026-09-03T14:00:00Z",
+            equity=Decimal("92931.80"),
+            start_of_day_equity=Decimal("99243.24"),
+            maverick_candidate_ids=frozenset({candidate.candidate_id}),
+        ),
+    )
+    assert eligible.approved
+    assert check(eligible, "effective_per_structure_percent").actual == "0.12"
+    assert eligible.awarded_risk <= Decimal("11151.8160")
+    assert "applied=true" in check(eligible, "maverick_final_day_tier").actual
+
+    for updates in (
+        {"maverick_entry_already_used": True},
+        {"index_cluster_defined_loss": Decimal("1")},
+    ):
+        fallback = evaluate_risk(
+            decision(candidate, confidence=0.80),
+            candidate,
+            context(
+                now="2026-09-03T14:00:00Z",
+                maverick_candidate_ids=frozenset({candidate.candidate_id}),
+                **updates,
+            ),
+        )
+        assert check(fallback, "effective_per_structure_percent").actual == "0.06"
+        assert "applied=false" in check(fallback, "maverick_final_day_tier").actual
 
 
 @pytest.mark.asyncio

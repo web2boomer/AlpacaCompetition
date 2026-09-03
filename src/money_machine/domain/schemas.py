@@ -207,6 +207,8 @@ class RiskContext(StrictModel):
     kill_switch_active: bool = False
     reconciliation_clean: bool = True
     daily_loss_entry_halt_active: bool = False
+    maverick_candidate_ids: frozenset[str] = frozenset()
+    maverick_entry_already_used: bool = False
 
 
 class AuctionResult(StrictModel):
@@ -229,6 +231,7 @@ class BrokerOrderRequest(StrictModel):
     parent_client_order_id: str | None = None
     exit_reason: str | None = None
     exit_urgency: Literal["soft", "urgent"] | None = None
+    take_profit_multiple: Decimal | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def intents_match_authority(self) -> "BrokerOrderRequest":

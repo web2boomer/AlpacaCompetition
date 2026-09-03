@@ -15,7 +15,7 @@ from money_machine.domain.clock import (
 )
 from money_machine.domain.daily_loss import loss_is_plausible, validate_managed_book_marks
 from money_machine.domain.enums import Action, RunMode
-from money_machine.domain.schemas import AccountSnapshot
+from money_machine.domain.schemas import AccountSnapshot, BrokerOrderRequest, BrokerOrderResult
 from money_machine.model_provider import ReplayModelProvider
 from money_machine.persistence.models import (
     AgentRunORM,
@@ -139,6 +139,44 @@ def test_thursday_daily_loss_baseline_is_first_clean_mark_and_never_resets(repos
     assert summary["start_of_day_equity"] == Decimal("99243.24")
     assert summary["start_of_day_equity"] * Decimal("0.06") == Decimal("5954.5944")
     assert summary["start_of_day_equity"] - Decimal("95998.10") == Decimal("3245.14")
+
+
+def test_maverick_submission_persists_target_and_consumes_daily_one_shot(
+    repository, directional_candidate
+) -> None:
+    now = datetime(2026, 9, 3, 14, tzinfo=UTC)
+    run_id, created = repository.begin_run("maverick-persistence", RunMode.REPLAY, now)
+    assert created
+    request = BrokerOrderRequest(
+        client_order_id="mm-comp-maverick-once",
+        candidate_id=directional_candidate.candidate_id,
+        quantity=1,
+        limit_price=directional_candidate.structure.net_price,
+        is_credit=False,
+        legs=directional_candidate.structure.legs,
+        environment_role="competition",
+        take_profit_multiple=Decimal("2.10"),
+    )
+    repository.persist_order(
+        run_id,
+        request,
+        BrokerOrderResult(
+            broker_order_id="broker-maverick-once",
+            client_order_id=request.client_order_id,
+            status="accepted",
+            submitted_at=now,
+            raw={"status": "accepted"},
+        ),
+    )
+
+    assert repository.maverick_entry_used(now=now)
+    assert not repository.maverick_entry_used(now=now + timedelta(days=1))
+    with repository.database.session() as session:
+        persisted = session.scalar(
+            select(BrokerOrderORM).where(BrokerOrderORM.client_order_id == request.client_order_id)
+        )
+        assert persisted is not None
+        assert persisted.raw_json["request"]["take_profit_multiple"] == "2.10"
 
 
 async def seed_managed_position(settings, repository, replay_adapter, *, quantity: str = "1"):
@@ -539,6 +577,41 @@ async def test_debit_stop_requires_visible_reset_then_two_cycle_reconfirmation(
         now=now,
     )
     assert opposite.candidate_id not in opposite_exclusions
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("prior_trend", "confirmed"),
+    [(Decimal("0.0051"), False), (Decimal("0.0050"), True)],
+)
+async def test_maverick_acceleration_boundary_is_exact(
+    repository, replay_adapter, directional_candidate, monkeypatch, prior_trend, confirmed
+) -> None:
+    now = replay_adapter.observed_at
+    symbol = directional_candidate.structure.underlying
+    current = await replay_adapter.underlying_snapshot(symbol)
+    current = current.model_copy(update={"observed_at": now, "trend_return_pct": Decimal("0.0060")})
+    prior = PriorMarketObservation(
+        cycle_at=now - timedelta(minutes=5),
+        observed_at=now - timedelta(minutes=5),
+        snapshot=current.model_copy(
+            update={"observed_at": now - timedelta(minutes=5), "trend_return_pct": prior_trend}
+        ),
+    )
+    monkeypatch.setattr(repository, "prior_market_observation", lambda **_kwargs: prior)
+    monkeypatch.setattr(repository, "latest_directional_stop", lambda **_kwargs: None)
+
+    exclusions, evidence = _directional_policy_exclusions(
+        (directional_candidate,),
+        snapshots=[current],
+        repository=repository,
+        run_id="current-run",
+        mode=RunMode.REPLAY,
+        now=now,
+    )
+
+    assert directional_candidate.candidate_id not in exclusions
+    assert evidence[directional_candidate.candidate_id]["maverick_signal_confirmed"] is confirmed
 
 
 def live_style_risk_summary(*, open_underlyings, pending_underlyings=frozenset()):
@@ -1644,6 +1717,7 @@ async def test_two_credible_breaches_with_fresh_complete_quotes_latch_and_close(
         mode=RunMode.LIVE,
     )
 
+    assert "daily_loss_control" in outcome.passport, outcome.passport
     control = outcome.passport["daily_loss_control"]
     assert control["status"] == "latched", repr(control)
     assert control["confirmation_count"] == 2
@@ -1743,6 +1817,44 @@ def test_daily_loss_latch_is_session_scoped(repository, replay_adapter) -> None:
         ).status
         == "clear"
     )
+
+
+@pytest.mark.asyncio
+async def test_authorized_final_day_limit_releases_old_six_percent_latch_without_order(
+    settings, repository, replay_adapter, monkeypatch
+) -> None:
+    now = datetime(2026, 9, 3, 15, 55, tzinfo=UTC)
+    repository.daily_loss_control(now=now, defined_loss_envelope=Decimal("0"))
+    repository.update_daily_loss_control(
+        now=now,
+        status="latched",
+        confirmation_count=2,
+        last_loss=Decimal("7068.20"),
+        defined_loss_envelope=Decimal("17293"),
+        quote_quality_passed=True,
+        reason="confirmed_credible_daily_loss_breach",
+    )
+    replay_adapter.data["account"]["equity"] = "92931.80"
+    replay_adapter.data["account"]["portfolio_value"] = "92931.80"
+    for symbol in replay_adapter.data["chains"]:
+        replay_adapter.data["chains"][symbol] = []
+    monkeypatch.setattr(repository, "has_managed_orders", lambda _role: True)
+
+    outcome = await AgentService(production_settings(settings), repository).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=now,
+        mode=RunMode.LIVE,
+    )
+
+    assert "daily_loss_control" in outcome.passport, outcome.passport
+    control = outcome.passport["daily_loss_control"]
+    assert control["status"] == "clear"
+    assert control["entry_halt_active"] is False
+    assert control["daily_loss_limit"] == "11000.0000"
+    assert control["observed_loss"] == "7068.20"
+    assert control["reason"] == "recovered_under_authorized_final_day_limit"
+    assert not outcome.order_submitted
 
 
 def test_opening_mark_regression_exceeds_defined_loss_envelope() -> None:

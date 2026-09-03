@@ -24,7 +24,12 @@ from money_machine.domain.enums import (
     RiskReason,
     RunMode,
 )
-from money_machine.domain.risk import COMPETITION_DRAWDOWN_PCT, DAILY_LOSS_PCT, evaluate_risk
+from money_machine.domain.risk import (
+    COMPETITION_DRAWDOWN_PCT,
+    DAILY_LOSS_PCT,
+    daily_loss_pct_at,
+    evaluate_risk,
+)
 from money_machine.domain.schemas import (
     AuctionResult,
     BrokerOrderRequest,
@@ -34,6 +39,7 @@ from money_machine.domain.schemas import (
     UnderlyingSnapshot,
 )
 from money_machine.execution import (
+    MAVERICK_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE,
     URGENT_MAX_REPRICE_ATTEMPTS,
     ManagedStructure,
     close_request,
@@ -61,6 +67,7 @@ DIRECTION_CONFIRMATION_MIN_GAP = timedelta(minutes=5)
 DIRECTION_CONFIRMATION_MAX_GAP = timedelta(minutes=10)
 STRATEGY_ROTATION_INTERVAL = timedelta(minutes=45)
 MEANINGFUL_PROGRESS_MULTIPLE = Decimal("1.05")
+MAVERICK_MIN_TREND_ACCELERATION = Decimal("0.001")
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,13 +185,31 @@ class AgentService:
             chains = {
                 symbol: list(chain) for symbol, chain in zip(UNIVERSE, chains_raw, strict=True)
             }
-            daily_limit = risk_summary["start_of_day_equity"] * DAILY_LOSS_PCT
+            effective_daily_loss_pct = daily_loss_pct_at(now)
+            daily_limit = risk_summary["start_of_day_equity"] * effective_daily_loss_pct
             raw_daily_loss = max(
                 Decimal("0"), risk_summary["start_of_day_equity"] - raw_account.equity
             )
             mark_quality_reason = "not_required"
             mark_quality_passed = False
             plausible_loss = True
+            authorized_final_day_latch_release = False
+            if (
+                daily_control.status == "latched"
+                and effective_daily_loss_pct > DAILY_LOSS_PCT
+                and daily_control.last_loss < daily_limit
+                and raw_daily_loss < daily_limit
+            ):
+                daily_control = self.repository.update_daily_loss_control(
+                    now=now,
+                    status="clear",
+                    confirmation_count=0,
+                    last_loss=raw_daily_loss,
+                    defined_loss_envelope=daily_control.defined_loss_envelope,
+                    quote_quality_passed=False,
+                    reason="recovered_under_authorized_final_day_limit",
+                )
+                authorized_final_day_latch_release = True
             if (
                 daily_control.status != "latched"
                 and raw_daily_loss >= daily_limit
@@ -279,7 +304,7 @@ class AgentService:
                     quote_quality_passed=False,
                     reason="later_cycle_recovered_before_validation",
                 )
-            elif daily_control.status == "clear":
+            elif daily_control.status == "clear" and not authorized_final_day_latch_release:
                 daily_control = self.repository.update_daily_loss_control(
                     now=now,
                     status="clear",
@@ -466,6 +491,12 @@ class AgentService:
                 kill_switch_active=bool(operational.get("kill_switch_active", False)),
                 reconciliation_clean=reconciliation_clean,
                 daily_loss_entry_halt_active=daily_control.status in {"provisional", "latched"},
+                maverick_candidate_ids=frozenset(
+                    candidate_id
+                    for candidate_id, item in directional_confirmation.items()
+                    if item.get("maverick_signal_confirmed") is True
+                ),
+                maverick_entry_already_used=self.repository.maverick_entry_used(now=now),
             )
             risk = evaluate_risk(envelope.decision, selected, context)
             holding_policy = entry_holding_policy(
@@ -512,6 +543,11 @@ class AgentService:
                         is_credit=selected.structure.is_credit,
                         legs=selected.structure.legs,
                         environment_role=self.settings.account_role.value,
+                        take_profit_multiple=(
+                            MAVERICK_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE
+                            if _risk_check_applied(risk, "maverick_final_day_tier")
+                            else None
+                        ),
                     )
                     order_result = await adapter.place_option_order(order_request)
                     self.repository.persist_order(run_id, order_request, order_result)
@@ -566,7 +602,7 @@ class AgentService:
                 and risk_summary is not None
                 and not account_checkpoint_persisted
                 and max(Decimal("0"), risk_summary["start_of_day_equity"] - account.equity)
-                < risk_summary["start_of_day_equity"] * DAILY_LOSS_PCT
+                < risk_summary["start_of_day_equity"] * daily_loss_pct_at(now)
             ):
                 self.repository.persist_account_checkpoint(
                     run_id,
@@ -934,6 +970,10 @@ def _candidate_by_id(
         (candidate for candidate in candidates if candidate.candidate_id == candidate_id),
         None,
     )
+
+
+def _risk_check_applied(risk: Any, name: str) -> bool:
+    return any(check.name == name and "applied=true" in check.actual for check in risk.checks)
 
 
 def _passport(
@@ -1311,6 +1351,46 @@ def _directional_policy_exclusions(
         post_stop_reason = None
         if stop is not None and (reset_at is None or prior is None or reset_at > prior.cycle_at):
             post_stop_reason = "post_stop_signal_reset_and_reconfirmation_required"
+        previous_trend = prior.snapshot.trend_return_pct if prior and prior.snapshot else None
+        trend_acceleration = (
+            abs(current.trend_return_pct) - abs(previous_trend)
+            if current is not None and previous_trend is not None
+            else None
+        )
+        opposite_action = (
+            Action.PUT_DEBIT_SPREAD.value
+            if candidate.action is Action.CALL_DEBIT_SPREAD
+            else Action.CALL_DEBIT_SPREAD.value
+        )
+        opposite_stop = repository.latest_directional_stop(
+            underlying=symbol,
+            action=opposite_action,
+            now=now,
+        )
+        opposite_reset_at = (
+            repository.directional_signal_reset_at(
+                stop=opposite_stop,
+                before_cycle_at=now,
+                mode=mode,
+            )
+            if opposite_stop is not None
+            else None
+        )
+        reset_reversal_confirmed = bool(
+            opposite_reset_at is not None
+            and prior is not None
+            and opposite_reset_at <= prior.cycle_at
+        )
+        maverick_signal_confirmed = bool(
+            confirmation_reason is None
+            and (
+                (
+                    trend_acceleration is not None
+                    and trend_acceleration >= MAVERICK_MIN_TREND_ACCELERATION
+                )
+                or reset_reversal_confirmed
+            )
+        )
         reasons = tuple(
             reason for reason in (confirmation_reason, post_stop_reason) if reason is not None
         )
@@ -1329,6 +1409,18 @@ def _directional_policy_exclusions(
             "latest_identical_setup_stop_at": stop.stopped_at.isoformat() if stop else None,
             "post_stop_signal_reset_at": reset_at.isoformat() if reset_at else None,
             "post_stop_reset_and_reconfirmation_passed": post_stop_reason is None,
+            "trend_acceleration": (
+                str(trend_acceleration) if trend_acceleration is not None else None
+            ),
+            "maverick_min_trend_acceleration": str(MAVERICK_MIN_TREND_ACCELERATION),
+            "opposite_setup_stop_at": opposite_stop.stopped_at.isoformat()
+            if opposite_stop
+            else None,
+            "opposite_setup_reset_at": (
+                opposite_reset_at.isoformat() if opposite_reset_at else None
+            ),
+            "reset_reversal_confirmed": reset_reversal_confirmed,
+            "maverick_signal_confirmed": maverick_signal_confirmed,
         }
         evidence[candidate.candidate_id] = item
         if reasons:

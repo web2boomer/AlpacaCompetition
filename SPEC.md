@@ -357,7 +357,8 @@ Competition limits:
 - Maximum loss per earnings structure: 0.35% of current equity.
 - Maximum combined SPY/QQQ/IWM cluster loss: 12.00% of current equity.
 - Maximum total concurrent defined loss: 15.00% of current equity.
-- Daily realized plus unrealized loss stop: 6.00% of start-of-day equity.
+- Daily realized plus unrealized loss stop: 6.00% of start-of-day equity, with an explicitly
+  bounded Thursday-only final-day boundary of 11.00%.
 - A raw daily-loss breach freezes new entries immediately. Liquidation of a clean, fully
   reconciled defined-risk book requires a second broker equity observation plus complete,
   fresh, internally consistent executable leg quotes. A loss materially beyond the persisted
@@ -384,15 +385,21 @@ Competition limits:
   persisted neutral or opposite signal is followed by the normal two-cycle reconfirmation.
 - Thursday's daily-loss baseline is the first clean regular-session account mark and never resets
   after a trade, exit, or return to flat. Each Passport reports the running loss even below the
-  latch. At the $99,243.24 Thursday start, the unchanged 6% stop is $5,954.59 (approximately
-  $6,000) and blocks further entries at about $93,288.65 after confirmation.
+  latch. At the $99,243.24 Thursday start, the authorized 11% boundary is $10,916.76 and blocks
+  further entries at about $88,326.48 after confirmation.
+- On Thursday only, one fresh high-conviction SPY/QQQ/IWM directional debit spread may use up to
+  12% of current equity, never exceeding the existing 12% index-cluster cap and only while the
+  cluster is flat. It requires every normal hard gate plus at least 0.10 percentage point of
+  five-minute absolute-trend acceleration, or a persisted reset followed by a reconfirmed
+  reversal. The submitted order persists a 2.10-times debit target, the unchanged 0.65 stop and
+  45-minute maximum hold. Any prior submission that day disables this one-shot tier.
 - The final-day target scenario assumes two independently qualifying high-conviction debit
   spreads near $5,954.59 each. Two 35% exits are about +$4,168 gross before slippage; one winner
   and one symmetric 35% stopped loser are approximately flat. Two stops are about -$4,168 before
   slippage. If both positions lose their entire debit before exits fill, the 12% index-cluster
   ceiling is about $11,909 at the $99,243.24 starting equity; the absolute 15% portfolio ceiling
-  is about $14,886. The 6% daily stop blocks subsequent entries and invokes risk handling, but it
-  cannot guarantee a 6% terminal loss after 12% of defined risk is already open. Wednesday's
+  is about $14,886. The Thursday-only 11% daily stop blocks subsequent entries and invokes risk
+  handling, but cannot guarantee an 11% terminal loss after 12% of defined risk is already open. Wednesday's
   observed premium gains of about 10.5% and 7.8% are weak evidence: Thursday 0DTE gamma makes a
   35% gain possible, not probable or guaranteed.
 - No new entries during close-only state.

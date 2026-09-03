@@ -49,7 +49,7 @@ require at least 0.50% deterministic trend strength, at least 2.00 reward/risk, 
 no greater than one-third of spread width so expensive premium alone cannot trigger the
 larger tier. Earnings stays
 at 0.35%. The shared SPY/QQQ/IWM cap is 12.00%, total concurrent defined loss is capped at
-15.00%, daily loss at 6.00%, and peak drawdown at 12.00%. A candidate is excluded when its
+15.00%, daily loss at 6.00% (11.00% on the final Thursday only), and peak drawdown at 12.00%. A candidate is excluded when its
 underlying already has a managed structure or pending entry; raw parent count is not a second
 portfolio veto. Quantity is always floored from the smallest remaining applicable budget, and
 the effective tier, per-underlying evidence, correlated headroom, and total headroom are recorded
@@ -86,9 +86,16 @@ not weaken reconciliation or lifecycle ownership of previously established struc
 
 The daily-loss control is persistent and New York-session-scoped. Its immutable baseline is the
 first clean regular-session equity, and every Passport reports the running observed loss even
-below the threshold. A raw 6.00% breach immediately
+below the threshold. Thursday's explicitly authorized final-day boundary is 11.00%; all other
+sessions remain 6.00%. A raw effective-boundary breach immediately
 freezes entries, but a clean defined-risk book is force-closed only after a second account
 observation and complete fresh executable leg quotes validate a plausible loss. A loss beyond
 the persisted defined-loss envelope (plus a documented tolerance) remains quarantined for
 mark-quality review. A credible breach latches through the session; reconciliation and
 structural safety incidents keep immediate close authority.
+
+The Thursday-only Maverick tier is one atomic high-conviction directional debit submission while
+the correlated index cluster is flat. It is capped by both 12% of current equity and the existing
+12% cluster cap, adds a fresh five-minute acceleration or reset-and-reconfirmed-reversal gate, and
+persists a 2.10-times debit exit target. The 0.65 stop, 45-minute maximum hold, liquidity, event,
+reconciliation, account, idempotency, cutoff and forced-flatten controls remain authoritative.
