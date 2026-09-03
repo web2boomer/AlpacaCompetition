@@ -22,6 +22,7 @@ from money_machine.domain.risk import (
     HIGH_CONVICTION_MIN_RICHNESS_RATIO,
     INDEX_CLUSTER_PCT,
     INDEX_PER_STRUCTURE_PCT,
+    MAVERICK_INDEX_PER_STRUCTURE_PCT,
     TOTAL_DEFINED_LOSS_PCT,
     evaluate_risk,
 )
@@ -343,6 +344,7 @@ async def test_earnings_risk_stays_at_point_three_five_percent(replay_candidate)
 def test_competition_risk_policy_constants_are_fixed() -> None:
     assert Decimal("0.03") == INDEX_PER_STRUCTURE_PCT
     assert Decimal("0.06") == HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT
+    assert Decimal("0.12") == MAVERICK_INDEX_PER_STRUCTURE_PCT
     assert Decimal("0.0035") == EARNINGS_PER_STRUCTURE_PCT
     assert Decimal("0.80") == HIGH_CONVICTION_MIN_CONFIDENCE
     assert Decimal("1.50") == HIGH_CONVICTION_MIN_RICHNESS_RATIO
@@ -354,6 +356,89 @@ def test_competition_risk_policy_constants_are_fixed() -> None:
     assert Decimal("0.15") == TOTAL_DEFINED_LOSS_PCT
     assert Decimal("0.06") == DAILY_LOSS_PCT
     assert Decimal("0.12") == COMPETITION_DRAWDOWN_PCT
+
+
+@pytest.mark.asyncio
+async def test_maverick_final_day_uses_cluster_cap_only_for_fresh_single_directional(
+    replay_candidate,
+) -> None:
+    candidate = directional_candidate(
+        replay_candidate,
+        trend_strength=Decimal("0.006"),
+        debit=Decimal("1.00"),
+        maximum_profit=Decimal("200.00"),
+    )
+    result = evaluate_risk(
+        decision(candidate, confidence=0.80),
+        candidate,
+        context(
+            now="2026-09-03T14:00:00Z",
+            equity=Decimal("95998.10"),
+            start_of_day_equity=Decimal("99243.24"),
+            peak_equity=Decimal("100000"),
+            maverick_candidate_ids=frozenset({candidate.candidate_id}),
+        ),
+    )
+
+    assert result.approved
+    assert check(result, "effective_per_structure_percent").actual == "0.12"
+    assert check(result, "effective_per_structure_budget").actual == "11519.7720"
+    assert result.quantity == 115
+    assert result.awarded_risk == Decimal("11500.00")
+    assert "applied=true" in check(result, "maverick_final_day_tier").actual
+
+
+@pytest.mark.asyncio
+async def test_maverick_refuses_existing_correlated_exposure_and_keeps_high_tier(
+    replay_candidate,
+) -> None:
+    candidate = directional_candidate(
+        replay_candidate,
+        trend_strength=Decimal("0.006"),
+        debit=Decimal("1.00"),
+        maximum_profit=Decimal("200.00"),
+    )
+    result = evaluate_risk(
+        decision(candidate, confidence=0.80),
+        candidate,
+        context(
+            now="2026-09-03T14:00:00Z",
+            index_cluster_defined_loss=Decimal("1"),
+            total_open_defined_loss=Decimal("1"),
+            maverick_candidate_ids=frozenset({candidate.candidate_id}),
+        ),
+    )
+
+    assert result.approved
+    assert check(result, "effective_per_structure_percent").actual == "0.06"
+    assert "applied=false" in check(result, "maverick_final_day_tier").actual
+
+
+@pytest.mark.asyncio
+async def test_maverick_is_one_shot_and_only_applies_on_final_day(replay_candidate) -> None:
+    candidate = directional_candidate(
+        replay_candidate,
+        trend_strength=Decimal("0.006"),
+        debit=Decimal("1.00"),
+        maximum_profit=Decimal("200.00"),
+    )
+    for now, already_used in (
+        ("2026-09-02T14:00:00Z", False),
+        ("2026-09-03T14:00:00Z", True),
+    ):
+        result = evaluate_risk(
+            decision(candidate, confidence=0.80),
+            candidate,
+            context(
+                now=now,
+                maverick_candidate_ids=frozenset({candidate.candidate_id}),
+                maverick_entry_already_used=already_used,
+            ),
+        )
+
+        assert result.approved
+        assert check(result, "effective_per_structure_percent").actual == "0.06"
+        assert "applied=false" in check(result, "maverick_final_day_tier").actual
 
 
 @pytest.mark.asyncio

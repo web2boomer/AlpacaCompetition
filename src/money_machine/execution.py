@@ -23,6 +23,7 @@ CREDIT_TAKE_PROFIT_FRACTION = Decimal("0.50")
 CREDIT_STOP_LOSS_MULTIPLE = Decimal("2.00")
 DEBIT_TAKE_PROFIT_MULTIPLE = Decimal("1.50")
 COMPETITION_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE = Decimal("1.35")
+MAVERICK_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE = Decimal("1.70")
 DEBIT_STOP_VALUE_FRACTION = Decimal("0.65")
 COMPETITION_DIRECTIONAL_DEBIT_STRATEGIES = frozenset(
     {Action.CALL_DEBIT_SPREAD, Action.PUT_DEBIT_SPREAD}
@@ -68,6 +69,7 @@ class ManagedStructure:
     opened_at: datetime
     maximum_holding_minutes: int
     structure: OptionStructure
+    take_profit_multiple: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,7 +313,7 @@ def structure_exit_signal(
         return StructureExitSignal(False, "credit_exit_not_reached", close_debit)
 
     close_credit = max(Decimal("0"), -cash_required)
-    take_profit_multiple = (
+    take_profit_multiple = managed.take_profit_multiple or (
         COMPETITION_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE
         if managed.structure.strategy in COMPETITION_DIRECTIONAL_DEBIT_STRATEGIES
         else DEBIT_TAKE_PROFIT_MULTIPLE

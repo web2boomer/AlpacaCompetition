@@ -85,6 +85,14 @@ class PriorMarketObservation:
     validation_error: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class DirectionalStopRecord:
+    candidate_id: str
+    underlying: str
+    action: str
+    stopped_at: datetime
+
+
 class AuditRepository:
     def __init__(self, database: Database) -> None:
         self.database = database
@@ -160,7 +168,7 @@ class AuditRepository:
     def daily_loss_control(
         self, *, now: datetime, defined_loss_envelope: Decimal
     ) -> DailyLossControl:
-        session_date = now.astimezone(UTC).date()
+        session_date = now.astimezone(NEW_YORK).date()
         with self.database.session() as session:
             row = session.get(DailyLossControlORM, session_date)
             if row is None:
@@ -193,7 +201,7 @@ class AuditRepository:
         reason: str,
         first_breach_at: datetime | None = None,
     ) -> DailyLossControl:
-        session_date = now.astimezone(UTC).date()
+        session_date = now.astimezone(NEW_YORK).date()
         with self.database.session() as session:
             row = session.get(DailyLossControlORM, session_date)
             if row is None:
@@ -224,7 +232,7 @@ class AuditRepository:
     def increase_daily_loss_envelope(self, *, now: datetime, amount: Decimal) -> None:
         if amount <= 0:
             return
-        session_date = now.astimezone(UTC).date()
+        session_date = now.astimezone(NEW_YORK).date()
         with self.database.session() as session:
             row = session.get(DailyLossControlORM, session_date)
             if row is None:
@@ -293,6 +301,78 @@ class AuditRepository:
             snapshot=snapshot,
             validation_error=validation_error,
         )
+
+    def latest_directional_stop(
+        self, *, underlying: str, action: str, now: datetime
+    ) -> DirectionalStopRecord | None:
+        """Return today's latest submitted deterministic debit-stop intent."""
+        local_date = now.astimezone(NEW_YORK).date()
+        with self.database.session() as session:
+            closing_orders = session.scalars(
+                select(BrokerOrderORM)
+                .where(BrokerOrderORM.environment_role == "competition")
+                .order_by(desc(BrokerOrderORM.submitted_at), desc(BrokerOrderORM.id))
+            )
+            for order in closing_orders:
+                request = order.raw_json.get("request", {})
+                if not isinstance(request, dict) or request.get("exit_reason") != "debit_stop_loss":
+                    continue
+                stopped_at = _safe_datetime(order.submitted_at or order.last_seen_at)
+                if stopped_at.astimezone(NEW_YORK).date() != local_date:
+                    continue
+                candidate_id = order.candidate_id.removesuffix(":close")
+                candidate = session.scalar(
+                    select(CandidateORM)
+                    .where(CandidateORM.candidate_id == candidate_id)
+                    .order_by(desc(CandidateORM.id))
+                    .limit(1)
+                )
+                if (
+                    candidate is not None
+                    and candidate.symbol == underlying
+                    and candidate.action == action
+                ):
+                    return DirectionalStopRecord(
+                        candidate_id=candidate_id,
+                        underlying=underlying,
+                        action=action,
+                        stopped_at=stopped_at,
+                    )
+        return None
+
+    def directional_signal_reset_at(
+        self,
+        *,
+        stop: DirectionalStopRecord,
+        before_cycle_at: datetime,
+        mode: RunMode,
+    ) -> datetime | None:
+        """Find a persisted neutral/opposite signal after a stopped directional setup."""
+        stopped_bullish = stop.action == "call_debit_spread"
+        with self.database.session() as session:
+            rows = session.execute(
+                select(MarketSnapshotORM, AgentRunORM.started_at)
+                .join(AgentRunORM, AgentRunORM.id == MarketSnapshotORM.agent_run_id)
+                .where(
+                    MarketSnapshotORM.symbol == stop.underlying,
+                    AgentRunORM.mode == mode.value,
+                    AgentRunORM.status == "completed",
+                    AgentRunORM.started_at > stop.stopped_at,
+                    AgentRunORM.started_at < before_cycle_at,
+                )
+                .order_by(AgentRunORM.started_at, MarketSnapshotORM.id)
+            )
+            for snapshot_row, cycle_at in rows:
+                features = dict(snapshot_row.features_json)
+                features.pop("richness_ratio", None)
+                try:
+                    snapshot = UnderlyingSnapshot.model_validate(features)
+                except ValidationError:
+                    continue
+                trend = snapshot.trend_return_pct
+                if abs(trend) < Decimal("0.004") or ((trend > 0) != stopped_bullish):
+                    return _safe_datetime(cycle_at)
+        return None
 
     def persist_candidates(self, run_id: str, candidates: tuple[Candidate, ...]) -> None:
         with self.database.session() as session:
@@ -392,6 +472,26 @@ class AuditRepository:
             )
             return bool(count and count > 0)
 
+    def maverick_entry_used(self, *, now: datetime) -> bool:
+        """Return whether today's one-shot competition directional tier was submitted."""
+        local_date = now.astimezone(NEW_YORK).date()
+        with self.database.session() as session:
+            orders = session.scalars(
+                select(BrokerOrderORM).where(
+                    BrokerOrderORM.environment_role == "competition",
+                    BrokerOrderORM.submitted_at.is_not(None),
+                )
+            )
+            for order in orders:
+                if _safe_datetime(order.submitted_at).astimezone(NEW_YORK).date() != local_date:
+                    continue
+                request = order.raw_json.get("request", {})
+                if not isinstance(request, dict) or request.get("is_closing", False):
+                    continue
+                if str(request.get("take_profit_multiple")) == "1.70":
+                    return True
+        return False
+
     def persist_order(
         self,
         run_id: str,
@@ -420,6 +520,11 @@ class AuditRepository:
                             "parent_client_order_id": request.parent_client_order_id,
                             "exit_reason": request.exit_reason,
                             "exit_urgency": request.exit_urgency,
+                            "take_profit_multiple": (
+                                str(request.take_profit_multiple)
+                                if request.take_profit_multiple is not None
+                                else None
+                            ),
                             "legs": [leg.model_dump(mode="json") for leg in request.legs],
                         },
                     },
@@ -704,6 +809,11 @@ class AuditRepository:
                             maximum_profit=structure.maximum_profit,
                             is_credit=structure.is_credit,
                         ),
+                        take_profit_multiple=(
+                            Decimal(str(request["take_profit_multiple"]))
+                            if request.get("take_profit_multiple") is not None
+                            else None
+                        ),
                     )
                 )
         return tuple(managed)
@@ -876,9 +986,15 @@ class AuditRepository:
                     if _safe_datetime(snapshot.observed_at).astimezone(NEW_YORK).date()
                     == local_date
                 ),
-                fallback_equity,
+                None,
             )
-            latest_today = max(BASELINE_EQUITY, first_today)
+            # The first clean regular-session mark is the immutable session baseline.
+            # Never raise it back to the competition's original $100k baseline: doing
+            # so would silently change the dollar value of the daily stop after a prior
+            # session's loss.
+            latest_today = (
+                first_today if first_today is not None else max(BASELINE_EQUITY, fallback_equity)
+            )
             open_statuses = (
                 "accepted",
                 "accepted_for_bidding",
@@ -1388,6 +1504,38 @@ class AuditRepository:
                 .limit(1)
             )
             return value
+
+    def flat_no_entry_since(self, *, mode: RunMode, before_cycle_at: datetime) -> datetime | None:
+        """Return the start of the contiguous full-execution, flat, no-entry streak."""
+        started_at: datetime | None = None
+        local_date = before_cycle_at.astimezone(NEW_YORK).date()
+        with self.database.session() as session:
+            runs = session.scalars(
+                select(AgentRunORM)
+                .where(
+                    AgentRunORM.mode == mode.value,
+                    AgentRunORM.status == "completed",
+                    AgentRunORM.started_at < before_cycle_at,
+                    AgentRunORM.passport_json.is_not(None),
+                )
+                .order_by(desc(AgentRunORM.started_at))
+            )
+            for run in runs:
+                observed_at = _safe_datetime(run.started_at)
+                if observed_at.astimezone(NEW_YORK).date() != local_date:
+                    break
+                passport = run.passport_json or {}
+                account = passport.get("account", {})
+                execution = passport.get("execution", {})
+                operational = passport.get("operational_state", {})
+                if (
+                    operational.get("execution_state") != ExecutionState.FULL_EXECUTION.value
+                    or not account.get("broker_confirmed_flat", False)
+                    or execution.get("entry_submitted", False)
+                ):
+                    break
+                started_at = observed_at
+        return started_at
 
     def passport_for_run(self, run_id: str) -> dict[str, Any] | None:
         with self.database.session() as session:

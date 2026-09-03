@@ -14,8 +14,8 @@ from money_machine.domain.clock import (
     SCORING_STARTS_AT,
 )
 from money_machine.domain.daily_loss import loss_is_plausible, validate_managed_book_marks
-from money_machine.domain.enums import RunMode
-from money_machine.domain.schemas import AccountSnapshot
+from money_machine.domain.enums import Action, RunMode
+from money_machine.domain.schemas import AccountSnapshot, BrokerOrderRequest, BrokerOrderResult
 from money_machine.model_provider import ReplayModelProvider
 from money_machine.persistence.models import (
     AgentRunORM,
@@ -24,8 +24,9 @@ from money_machine.persistence.models import (
     FillORM,
     MarketSnapshotORM,
 )
+from money_machine.persistence.repository import DirectionalStopRecord, PriorMarketObservation
 from money_machine.safety import configured_account_fingerprint
-from money_machine.service import AgentService
+from money_machine.service import AgentService, _directional_policy_exclusions
 from money_machine.settings import Settings
 
 
@@ -94,6 +95,88 @@ def test_portfolio_peak_uses_only_regular_market_competition_marks(repository) -
         raw_equities = list(session.scalars(select(EquitySnapshotORM.equity)))
     assert Decimal("228875.69") in raw_equities
     assert len(raw_equities) == 4
+
+
+def test_thursday_daily_loss_baseline_is_first_clean_mark_and_never_resets(repository) -> None:
+    session_start = datetime(2026, 9, 3, 13, 30, tzinfo=UTC)
+    later = datetime(2026, 9, 3, 14, 5, tzinfo=UTC)
+    for observed_at, equity in (
+        (session_start, Decimal("99243.24")),
+        (later, Decimal("95998.10")),
+    ):
+        run_id = str(uuid4())
+        with repository.database.session() as session:
+            session.add(
+                AgentRunORM(
+                    id=run_id,
+                    cycle_key=f"daily-baseline:{run_id}",
+                    correlation_id=str(uuid4()),
+                    mode="live",
+                    status="completed",
+                    started_at=observed_at,
+                    completed_at=observed_at,
+                    passport_json={"operational_state": {"reconciliation_clean": True}},
+                )
+            )
+            session.add(
+                EquitySnapshotORM(
+                    agent_run_id=run_id,
+                    observed_at=observed_at,
+                    equity=equity,
+                    cash=equity,
+                    buying_power=equity * 4,
+                    portfolio_value=equity,
+                    realized_pl=Decimal("0"),
+                    unrealized_pl=Decimal("0"),
+                    peak_equity=Decimal("100000"),
+                    drawdown=Decimal("100000") - equity,
+                    official=True,
+                )
+            )
+
+    summary = repository.portfolio_risk_summary(Decimal("95000"), now=later + timedelta(minutes=5))
+
+    assert summary["start_of_day_equity"] == Decimal("99243.24")
+    assert summary["start_of_day_equity"] * Decimal("0.06") == Decimal("5954.5944")
+    assert summary["start_of_day_equity"] - Decimal("95998.10") == Decimal("3245.14")
+
+
+def test_maverick_submission_is_persisted_and_consumes_the_daily_one_shot(
+    repository, directional_candidate
+) -> None:
+    now = datetime(2026, 9, 3, 14, tzinfo=UTC)
+    run_id, created = repository.begin_run("maverick-persistence", RunMode.REPLAY, now)
+    assert created
+    request = BrokerOrderRequest(
+        client_order_id="mm-comp-maverick-once",
+        candidate_id=directional_candidate.candidate_id,
+        quantity=1,
+        limit_price=directional_candidate.structure.net_price,
+        is_credit=False,
+        legs=directional_candidate.structure.legs,
+        environment_role="competition",
+        take_profit_multiple=Decimal("1.70"),
+    )
+    repository.persist_order(
+        run_id,
+        request,
+        BrokerOrderResult(
+            broker_order_id="broker-maverick-once",
+            client_order_id=request.client_order_id,
+            status="accepted",
+            submitted_at=now,
+            raw={"status": "accepted"},
+        ),
+    )
+
+    assert repository.maverick_entry_used(now=now)
+    assert not repository.maverick_entry_used(now=now + timedelta(days=1))
+    with repository.database.session() as session:
+        persisted = session.scalar(
+            select(BrokerOrderORM).where(BrokerOrderORM.client_order_id == request.client_order_id)
+        )
+        assert persisted is not None
+        assert persisted.raw_json["request"]["take_profit_multiple"] == "1.70"
 
 
 async def seed_managed_position(settings, repository, replay_adapter, *, quantity: str = "1"):
@@ -323,6 +406,220 @@ class DirectionalReplayModel(ReplayModelProvider):
         )
 
 
+def seed_flat_rotation_clock(repository, *, now: datetime, last_setup=None) -> None:
+    started_at = now - timedelta(minutes=45)
+    run_id, created = repository.begin_run(f"rotation-seed:{uuid4()}", RunMode.REPLAY, started_at)
+    assert created
+    repository.complete_run(
+        run_id,
+        completed_at=started_at,
+        passport={
+            "account": {"broker_confirmed_flat": True},
+            "operational_state": {"execution_state": "full_execution"},
+            "execution": {"entry_submitted": False},
+            "decision": {"candidate_id": None},
+            "candidates": [],
+            "strategy_rotation": {
+                "flat_no_entry": {
+                    "active": True,
+                    "started_at": started_at.isoformat(),
+                    "elapsed_minutes": 0,
+                    "rotation_due": False,
+                },
+                "open_structures": [],
+                "last_setup": last_setup,
+            },
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_flat_inactivity_emits_persisted_rotation_and_audited_abstention(
+    settings, repository, replay_adapter
+) -> None:
+    seed_flat_rotation_clock(repository, now=replay_adapter.observed_at)
+    for symbol in replay_adapter.data["chains"]:
+        replay_adapter.data["chains"][symbol] = []
+
+    outcome = await AgentService(settings, repository).run_cycle(
+        adapter=replay_adapter,
+        model=CapturingReplayModel(),
+        now=replay_adapter.observed_at,
+        mode=RunMode.REPLAY,
+    )
+
+    rotation = outcome.passport["strategy_rotation"]
+    assert rotation["flat_no_entry"]["elapsed_minutes"] == 45
+    assert rotation["flat_no_entry"]["rotation_due"] is True
+    assert rotation["decision"] == "rotate_playbook"
+    assert rotation["reason"] == "flat_without_entry_for_45_minutes"
+    assert "45-minute strategy rotation fired" in outcome.passport["decision"]["thesis"]
+    assert not outcome.order_submitted
+    assert repository.latest_passport()["strategy_rotation"] == rotation
+
+
+@pytest.mark.asyncio
+async def test_rotation_excludes_stagnant_setup_and_selects_alternative_underlying(
+    settings, repository, replay_adapter
+) -> None:
+    spy = next(item for item in replay_adapter.data["underlyings"] if item["symbol"] == "SPY")
+    spy.update(
+        spot="760.00",
+        previous_close="767.68",
+        realized_move_pct="0.01",
+        trend_return_pct="-0.01",
+    )
+    seed_flat_rotation_clock(
+        repository,
+        now=replay_adapter.observed_at,
+        last_setup={
+            "underlying": "QQQ",
+            "action": "index_condor",
+            "candidate_id": "prior-qqq-condor",
+        },
+    )
+    model = CapturingReplayModel(preferred_underlying="SPY")
+
+    outcome = await AgentService(settings, repository).run_cycle(
+        adapter=replay_adapter,
+        model=model,
+        now=replay_adapter.observed_at,
+        mode=RunMode.REPLAY,
+    )
+
+    assert outcome.order_submitted
+    assert outcome.passport["decision"]["candidate_id"].startswith("spy-")
+    exclusions = outcome.passport["portfolio_candidate_exclusions"]
+    assert any(
+        "strategy_rotation_same_setup_excluded" in reasons
+        for candidate_id, reasons in exclusions.items()
+        if candidate_id.startswith("qqq-index_condor-")
+    )
+    assert outcome.passport["strategy_rotation"]["decision"] == "entry_submitted"
+
+
+@pytest.mark.asyncio
+async def test_debit_stop_requires_visible_reset_then_two_cycle_reconfirmation(
+    repository, replay_adapter, directional_candidate, monkeypatch
+) -> None:
+    now = replay_adapter.observed_at
+    current = await replay_adapter.underlying_snapshot(directional_candidate.structure.underlying)
+    current = current.model_copy(update={"observed_at": now})
+    prior_snapshot = current.model_copy(update={"observed_at": now - timedelta(minutes=5)})
+    prior = PriorMarketObservation(
+        cycle_at=now - timedelta(minutes=5),
+        observed_at=now - timedelta(minutes=5),
+        snapshot=prior_snapshot,
+    )
+    stop = DirectionalStopRecord(
+        candidate_id="stopped-directional",
+        underlying=directional_candidate.structure.underlying,
+        action=directional_candidate.action.value,
+        stopped_at=now - timedelta(minutes=15),
+    )
+    monkeypatch.setattr(repository, "prior_market_observation", lambda **_kwargs: prior)
+    monkeypatch.setattr(repository, "latest_directional_stop", lambda **_kwargs: stop)
+    monkeypatch.setattr(repository, "directional_signal_reset_at", lambda **_kwargs: None)
+
+    excluded, evidence = _directional_policy_exclusions(
+        (directional_candidate,),
+        snapshots=[current],
+        repository=repository,
+        run_id="current-run",
+        mode=RunMode.REPLAY,
+        now=now,
+    )
+
+    reasons = excluded[directional_candidate.candidate_id]
+    assert "post_stop_signal_reset_and_reconfirmation_required" in reasons
+    assert not evidence[directional_candidate.candidate_id][
+        "post_stop_reset_and_reconfirmation_passed"
+    ]
+
+    monkeypatch.setattr(
+        repository,
+        "directional_signal_reset_at",
+        lambda **_kwargs: now - timedelta(minutes=10),
+    )
+    allowed, refreshed = _directional_policy_exclusions(
+        (directional_candidate,),
+        snapshots=[current],
+        repository=repository,
+        run_id="current-run",
+        mode=RunMode.REPLAY,
+        now=now,
+    )
+    assert directional_candidate.candidate_id not in allowed
+    assert refreshed[directional_candidate.candidate_id][
+        "post_stop_reset_and_reconfirmation_passed"
+    ]
+
+    opposite = directional_candidate.model_copy(
+        update={
+            "action": (
+                Action.PUT_DEBIT_SPREAD
+                if directional_candidate.action is Action.CALL_DEBIT_SPREAD
+                else Action.CALL_DEBIT_SPREAD
+            )
+        }
+    )
+    monkeypatch.setattr(
+        repository,
+        "latest_directional_stop",
+        lambda **kwargs: stop if kwargs["action"] == stop.action else None,
+    )
+    opposite_exclusions, _ = _directional_policy_exclusions(
+        (opposite,),
+        snapshots=[current],
+        repository=repository,
+        run_id="current-run",
+        mode=RunMode.REPLAY,
+        now=now,
+    )
+    assert opposite.candidate_id not in opposite_exclusions
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("prior_trend", "confirmed"),
+    [(Decimal("0.0051"), False), (Decimal("0.0050"), True)],
+)
+async def test_maverick_acceleration_boundary_is_exact_and_audited(
+    repository, replay_adapter, directional_candidate, monkeypatch, prior_trend, confirmed
+) -> None:
+    now = replay_adapter.observed_at
+    symbol = directional_candidate.structure.underlying
+    current = await replay_adapter.underlying_snapshot(symbol)
+    current = current.model_copy(update={"observed_at": now, "trend_return_pct": Decimal("0.0060")})
+    prior_snapshot = current.model_copy(
+        update={
+            "observed_at": now - timedelta(minutes=5),
+            "trend_return_pct": prior_trend,
+        }
+    )
+    prior = PriorMarketObservation(
+        cycle_at=now - timedelta(minutes=5),
+        observed_at=now - timedelta(minutes=5),
+        snapshot=prior_snapshot,
+    )
+    monkeypatch.setattr(repository, "prior_market_observation", lambda **_kwargs: prior)
+    monkeypatch.setattr(repository, "latest_directional_stop", lambda **_kwargs: None)
+
+    exclusions, evidence = _directional_policy_exclusions(
+        (directional_candidate,),
+        snapshots=[current],
+        repository=repository,
+        run_id="current-run",
+        mode=RunMode.REPLAY,
+        now=now,
+    )
+
+    item = evidence[directional_candidate.candidate_id]
+    assert directional_candidate.candidate_id not in exclusions
+    assert item["maverick_signal_confirmed"] is confirmed
+    assert Decimal(item["trend_acceleration"]) == abs(current.trend_return_pct) - abs(prior_trend)
+
+
 def live_style_risk_summary(*, open_underlyings, pending_underlyings=frozenset()):
     return {
         "peak_equity": Decimal("100000"),
@@ -486,8 +783,8 @@ async def test_directional_entry_fill_take_profit_atomic_close_and_terminal_norm
         if candidate["candidate_id"] == opened.passport["decision"]["candidate_id"]
     )
     assert selected["action"] in {"call_debit_spread", "put_debit_spread"}
-    assert selected["maximum_holding_minutes"] == 60
-    assert opened.passport["decision"]["maximum_holding_minutes"] == 60
+    assert selected["maximum_holding_minutes"] == 45
+    assert opened.passport["decision"]["maximum_holding_minutes"] == 45
     selected_sides = {leg["symbol"]: leg["side"] for leg in selected["structure"]["legs"]}
     with repository.database.session() as session:
         fills = tuple(session.scalars(select(FillORM)))
@@ -497,7 +794,7 @@ async def test_directional_entry_fill_take_profit_atomic_close_and_terminal_norm
                 Decimal("2.00") if selected_sides[fill.symbol] == "buy" else Decimal("0.75")
             )
     managed = repository.open_managed_structures()[0]
-    assert managed.maximum_holding_minutes == 60
+    assert managed.maximum_holding_minutes == 45
     assert managed.structure.net_price == Decimal("1.25")
     assert len(replay_adapter.submitted_requests) == 1
     assert len(replay_adapter.submitted_requests[0].legs) == 2

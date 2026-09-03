@@ -32,7 +32,7 @@ COMPETITION_MACRO_EVENTS = (
     MacroEvent("Employment Situation", datetime(2026, 9, 4, 12, 30, tzinfo=UTC), 90),
 )
 
-DIRECTIONAL_MAX_HOLDING_MINUTES = 60
+DIRECTIONAL_MAX_HOLDING_MINUTES = 45
 DIRECTIONAL_EVENT_BUFFER_MINUTES = 15
 DIRECTIONAL_MINIMUM_ENTRY_MINUTES = 30
 
@@ -79,7 +79,7 @@ def directional_event_window(at: datetime) -> DirectionalEventWindow:
     holding_minutes = max(0, int((deadline - now).total_seconds() // 60))
     accepted = holding_minutes >= DIRECTIONAL_MINIMUM_ENTRY_MINUTES
     reason = (
-        "directional_60_minute_cap"
+        "directional_45_minute_cap"
         if deadline == maximum_deadline
         else f"event_safe_before_{next_event.name if next_event else 'none'}"
     )

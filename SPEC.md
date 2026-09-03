@@ -189,7 +189,7 @@ Official P&L is measured from Monday's open using the fresh competition account 
 
 For this one-off event, the reviewed BLS, BEA, and Federal Reserve release times are also
 version-controlled. Condors retain the conservative six-hour overlap veto. Directional debit
-spreads instead have a hard 60-minute maximum hold and a 15-minute pre-release buffer: entry is
+spreads instead have a hard 45-minute maximum hold and a 15-minute pre-release buffer: entry is
 allowed only when at least 30 minutes remain and the persisted lifecycle deadline does not cross
 that buffer. Every strategy observes the configured post-release cooldown, and an explicit
 upstream event-risk flag always vetoes entry.
@@ -376,6 +376,25 @@ Competition limits:
 - Competition directional debit spreads take profit when fresh executable closing quotes reach
   1.35 times opening debit. Other debit strategies retain the 1.50 multiple, credit strategies
   retain their separate exit policy, and the directional 0.65 premium-value stop is unchanged.
+- The final-day directional playbook rotates deterministically after 45 minutes. Decision
+  Passports persist the flat/no-entry clock and each open structure's elapsed time and best
+  executable progress. A setup that remains flat and unproductive for the full interval is
+  excluded on the next auction in favor of another underlying or independently confirmed
+  direction. After a debit stop, the identical underlying/direction remains excluded until a
+  persisted neutral or opposite signal is followed by the normal two-cycle reconfirmation.
+- Thursday's daily-loss baseline is the first clean regular-session account mark and never resets
+  after a trade, exit, or return to flat. Each Passport reports the running loss even below the
+  latch. At the $99,243.24 Thursday start, the unchanged 6% stop is $5,954.59 (approximately
+  $6,000) and blocks further entries at about $93,288.65 after confirmation.
+- On Thursday only, one fresh high-conviction SPY/QQQ/IWM directional debit spread may use the
+  existing 12% index-cluster budget when the index cluster is flat. It requires the normal
+  confidence, trend, reward/risk, debit/width, liquidity, data, event, account, reconciliation and
+  direction-confirmation gates plus at least 0.10 percentage point of five-minute absolute-trend
+  acceleration, or a persisted reset followed by a reconfirmed reversal. The one-shot order uses
+  a persisted 1.70-times debit target, the unchanged 0.65 premium stop and the 45-minute cap.
+  Any prior Maverick submission that day or any existing correlated index exposure disables the
+  tier; qualifying trades then fall back to the ordinary deterministic cap rather than bypassing
+  risk controls.
 - The final-day target scenario assumes two independently qualifying high-conviction debit
   spreads near $5,954.59 each. Two 35% exits are about +$4,168 gross before slippage; one winner
   and one symmetric 35% stopped loser are approximately flat. Two stops are about -$4,168 before
@@ -430,7 +449,7 @@ marketable multi-leg limits.
 
 Every approved entry records an effective holding deadline equal to the earliest of the model's
 requested hold, the 3:50 PM ET daily hard exit, and Thursday's forced-flatten boundary.
-Directional spreads additionally clamp the model hold to 60 minutes and to 15 minutes before the
+Directional spreads additionally clamp the model hold to 45 minutes and to 15 minutes before the
 next scheduled event. At least 30 minutes must remain before the effective deadline or the entry
 fails closed.
 

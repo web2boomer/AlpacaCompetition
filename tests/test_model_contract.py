@@ -236,7 +236,7 @@ async def test_openai_double_abstention_cannot_veto_eligible_directional(
     assert envelope.decision.action is directional.action
     assert envelope.decision.candidate_id == directional.candidate_id
     assert envelope.decision.confidence == 0.72
-    assert envelope.decision.maximum_holding_minutes == 60
+    assert envelope.decision.maximum_holding_minutes == 45
     assert envelope.selection_provenance == "deterministic_top_ranked"
 
     context = RiskContext(

@@ -9,6 +9,7 @@ from money_machine.domain.schemas import OptionQuote
 from money_machine.execution import (
     COMPETITION_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE,
     DEBIT_STOP_VALUE_FRACTION,
+    MAVERICK_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE,
     ManagedStructure,
     daily_hard_exit_deadline,
     entry_holding_policy,
@@ -262,6 +263,55 @@ def test_directional_debit_stop_remains_at_point_sixty_five(directional_candidat
     assert signal.should_close
     assert signal.reason == "debit_stop_loss"
     assert signal.executable_price == stop_value
+
+
+def test_maverick_directional_uses_persisted_one_point_seventy_target(
+    directional_candidate,
+) -> None:
+    opened_at = datetime(2026, 9, 3, 14, tzinfo=UTC)
+    managed = replace(
+        _managed(directional_candidate, opened_at=opened_at),
+        take_profit_multiple=MAVERICK_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE,
+    )
+    long_leg = next(leg for leg in managed.structure.legs if leg.side.value == "buy")
+    short_leg = next(leg for leg in managed.structure.legs if leg.side.value == "sell")
+    target = managed.structure.net_price * Decimal("1.70")
+    quotes = {
+        long_leg.symbol: OptionQuote(
+            **long_leg.model_dump(exclude={"side", "position_intent", "ratio_qty", "bid", "ask"}),
+            bid=target + Decimal("0.10"),
+            ask=target + Decimal("0.11"),
+            implied_volatility=Decimal("0.20"),
+            observed_at=opened_at,
+        ),
+        short_leg.symbol: OptionQuote(
+            **short_leg.model_dump(exclude={"side", "position_intent", "ratio_qty", "bid", "ask"}),
+            bid=Decimal("0.09"),
+            ask=Decimal("0.10"),
+            implied_volatility=Decimal("0.20"),
+            observed_at=opened_at,
+        ),
+    }
+
+    below = structure_exit_signal(
+        managed,
+        quotes={
+            **quotes,
+            long_leg.symbol: quotes[long_leg.symbol].model_copy(
+                update={"bid": target + Decimal("0.09")}
+            ),
+        },
+        now=opened_at + timedelta(minutes=5),
+    )
+    at_target = structure_exit_signal(
+        managed,
+        quotes=quotes,
+        now=opened_at + timedelta(minutes=5),
+    )
+
+    assert not below.should_close
+    assert at_target.should_close
+    assert at_target.reason == "debit_take_profit"
 
 
 def test_competition_directional_take_profit_does_not_apply_to_other_debits(

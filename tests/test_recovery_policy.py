@@ -41,6 +41,12 @@ class PriorRepository:
     def prior_market_observation(self, **_kwargs):
         return self.prior
 
+    def latest_directional_stop(self, **_kwargs):
+        return None
+
+    def directional_signal_reset_at(self, **_kwargs):
+        return None
+
 
 @pytest.mark.asyncio
 async def test_condors_are_audit_only_and_confirmed_directional_ids_remain_exact(

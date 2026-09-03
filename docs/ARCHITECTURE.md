@@ -59,7 +59,7 @@ Index condors must clear 0.20 reward/risk using adverse executable bid/ask econo
 model auction; the 0.25 high-conviction threshold remains stricter and unchanged. Rejected
 structures remain in the complete CandidateBuildReport for audit and counterfactual analysis.
 Entries also require at least 30 minutes before the earliest of the model hold, the 3:50 PM ET
-daily hard exit, and Thursday forced flatten. Directional spreads cap the model hold at 60 minutes
+daily hard exit, and Thursday forced flatten. Directional spreads cap the model hold at 45 minutes
 and persist a deadline no later than 15 minutes before the next macro event; configured event
 cooldowns and explicit upstream event vetoes remain fail closed. Soft maximum-hold/profit exits use quote-aware
 backoff, while urgent safety exits retain aggressive bounded concessions.
@@ -68,7 +68,7 @@ On the final competition day, the 08:30 ET Productivity/international-trade rele
 75-minute fail-closed cooldown, making 09:45 ET the earliest possible entry. Directional debit
 spreads require the existing two-cycle post-open confirmation and use an executable-quote
 take-profit at 1.35 times the broker-confirmed opening debit; their 0.65 premium-value stop and
-60-minute cap remain. Same-day contracts remain eligible throughout their New York expiration
+45-minute cap remain. Same-day contracts remain eligible throughout their New York expiration
 date; expired prior-date contracts remain excluded.
 
 During the final September 2–3 competition recovery window, the production selector is
@@ -76,11 +76,23 @@ directional-only for new entries. Condors remain in the complete candidate repor
 counterfactual analysis but are deterministically excluded before model selection. Directional
 spreads require two consecutive completed five-minute observations with the same direction and at
 least 0.40% absolute return from previous close; missing, reversed, weak, or stale history abstains.
+The persisted strategy-rotation evidence carries a flat/no-entry start time and per-open-structure
+progress between Passports. At 45 minutes the current underlying/direction is not silently retried;
+the selector admits only independently gated alternatives. A debit-stop setup is locked out until
+a durable neutral/opposite observation resets it and two later cycles reconfirm the direction.
+On Thursday only, the audited Maverick tier can allocate one high-conviction directional debit
+spread up to the existing 12% index-cluster cap when that cluster is flat. Eligibility adds fresh
+five-minute absolute-trend acceleration of at least 0.10 percentage point, or a reset followed by
+a reconfirmed reversal, to every existing directional hard gate. The submitted order persists its
+1.70-times take-profit override so lifecycle restarts retain the same exit authority. The first
+submission consumes the one-shot for the New York session; no second proxy bet can qualify.
 Production entry authority is additionally restricted to 09:45–15:20 ET, while Thursday retains
 the immutable 14:30 ET competition cutoff. These selector controls do
 not weaken reconciliation or lifecycle ownership of previously established structures.
 
-The daily-loss control is persistent and session-scoped. A raw 6.00% breach immediately
+The daily-loss control is persistent and New York-session-scoped. Its immutable baseline is the
+first clean regular-session equity, and every Passport reports the running observed loss even
+below the threshold. A raw 6.00% breach immediately
 freezes entries, but a clean defined-risk book is force-closed only after a second account
 observation and complete fresh executable leg quotes validate a plausible loss. A loss beyond
 the persisted defined-loss envelope (plus a documented tolerance) remains quarantined for

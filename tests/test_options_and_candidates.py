@@ -189,8 +189,8 @@ def test_directional_event_window_restores_morning_runway_and_enforces_boundary(
     cooldown = directional_event_window(datetime(2026, 9, 2, 18, 15, tzinfo=UTC))
 
     assert morning.accepted
-    assert morning.maximum_holding_minutes == 60
-    assert morning.deadline == datetime(2026, 9, 2, 15, 31, tzinfo=UTC)
+    assert morning.maximum_holding_minutes == 45
+    assert morning.deadline == datetime(2026, 9, 2, 15, 16, tzinfo=UTC)
     assert not too_close.accepted
     assert too_close.deadline == datetime(2026, 9, 2, 17, 45, tzinfo=UTC)
     assert "insufficient_event_safe_window" in too_close.reason
@@ -207,7 +207,7 @@ def test_thursday_release_cooldown_ends_at_0945_et() -> None:
     assert not scheduled_macro_event_risk(boundary, intended_holding_minutes=60)
     window = directional_event_window(boundary)
     assert window.accepted
-    assert window.maximum_holding_minutes == 60
+    assert window.maximum_holding_minutes == 45
 
 
 @pytest.mark.asyncio
@@ -249,8 +249,8 @@ async def test_directional_candidate_uses_event_safe_window_not_six_hour_condor_
     report = build_candidates([snapshot], {"IWM": chain}, now)
     candidate = only_directional_candidate(report)
 
-    assert candidate.maximum_holding_minutes == 60
-    assert candidate.holding_deadline == now + timedelta(minutes=60)
+    assert candidate.maximum_holding_minutes == 45
+    assert candidate.holding_deadline == now + timedelta(minutes=45)
     assert not candidate.event_risk
     assert any("event-safe holding deadline" in item for item in candidate.gate_evidence)
 
