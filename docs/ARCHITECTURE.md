@@ -68,10 +68,9 @@ On the final competition day, the 08:30 ET Productivity/international-trade rele
 75-minute fail-closed cooldown, making 09:45 ET the earliest possible entry. Directional debit
 spreads require the existing two-cycle post-open confirmation. Thursday high-conviction
 directional exposure uses an executable-quote take-profit at 2.10 times the broker-confirmed
-opening debit, including already-open exposure whose persisted Risk Decision proves the tier;
-other competition directional debits retain 1.35. The 0.65 premium-value stop and 45-minute cap
-remain. Same-day contracts remain eligible throughout their New York expiration date; expired
-prior-date contracts remain excluded.
+opening debit, including already-open exposure; other competition directional debits retain
+1.35. The 0.65 premium-value stop and 45-minute cap remain. Same-day contracts remain eligible
+throughout their New York expiration date; expired prior-date contracts remain excluded.
 
 During the final September 2–3 competition recovery window, the production selector is
 directional-only for new entries. Condors remain in the complete candidate report for audit and
@@ -95,6 +94,13 @@ observation and complete fresh executable leg quotes validate a plausible loss. 
 the persisted defined-loss envelope (plus a documented tolerance) remains quarantined for
 mark-quality review. A credible breach latches through the session; reconciliation and
 structural safety incidents keep immediate close authority.
+
+For 2026-09-03 only, daily-loss and competition-drawdown states remain visible and retain
+emergency-exit authority but do not veto new entries. Both the correlated-index and total
+defined-loss caps become 24% of current equity. The selector and risk engine permit at most one
+additional independently validated index structure per already-used underlying; pending orders
+and a second existing structure still exclude that underlying. This override expires at the
+official equity lock.
 
 The Thursday-only Maverick tier is one atomic high-conviction directional debit submission while
 the correlated index cluster is flat. It is capped by both 12% of current equity and the existing

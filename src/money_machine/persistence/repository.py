@@ -760,7 +760,6 @@ class AuditRepository:
                     CandidateORM,
                     OptionStructureORM,
                     ModelDecisionORM,
-                    RiskDecisionORM,
                 )
                 .join(
                     CandidateORM,
@@ -777,17 +776,13 @@ class AuditRepository:
                     ModelDecisionORM,
                     ModelDecisionORM.agent_run_id == BrokerOrderORM.agent_run_id,
                 )
-                .join(
-                    RiskDecisionORM,
-                    RiskDecisionORM.agent_run_id == BrokerOrderORM.agent_run_id,
-                )
                 .where(
                     BrokerOrderORM.status.in_(
                         ("filled", "closing", "partially_filled_canceled", "externally_reduced")
                     )
                 )
             )
-            for order, candidate, structure, decision, risk in rows:
+            for order, candidate, structure, decision in rows:
                 request = order.raw_json.get("request", {})
                 if isinstance(request, dict) and request.get("is_closing"):
                     continue
@@ -826,7 +821,6 @@ class AuditRepository:
                         take_profit_multiple=_managed_take_profit_multiple(
                             order=order,
                             structure=structure,
-                            risk=risk,
                             request=request,
                         ),
                     )
@@ -1100,6 +1094,31 @@ class AuditRepository:
                     )
                 )
             )
+            open_underlying_count_rows = session.execute(
+                select(CandidateORM.symbol, func.count())
+                .join(
+                    BrokerOrderORM,
+                    and_(
+                        BrokerOrderORM.candidate_id == CandidateORM.candidate_id,
+                        BrokerOrderORM.agent_run_id == CandidateORM.agent_run_id,
+                    ),
+                )
+                .where(
+                    BrokerOrderORM.status.in_(
+                        [
+                            "partially_filled",
+                            "partially_filled_canceled",
+                            "filled",
+                            "closing",
+                            "externally_reduced",
+                        ]
+                    )
+                )
+                .group_by(CandidateORM.symbol)
+            ).all()
+            open_underlying_structure_counts: dict[str, int] = {
+                str(row[0]): int(row[1]) for row in open_underlying_count_rows
+            }
             return {
                 "peak_equity": Decimal(str(peak)),
                 "start_of_day_equity": Decimal(str(latest_today)),
@@ -1108,6 +1127,7 @@ class AuditRepository:
                 "open_alpha_structures": int(open_count),
                 "pending_underlyings": frozenset(pending),
                 "open_underlyings": frozenset(open_underlyings),
+                "open_underlying_structure_counts": open_underlying_structure_counts,
             }
 
     def latest_official_equity_at_or_before(
@@ -1763,7 +1783,6 @@ def _managed_take_profit_multiple(
     *,
     order: BrokerOrderORM,
     structure: OptionStructureORM,
-    risk: RiskDecisionORM,
     request: dict[str, Any],
 ) -> Decimal | None:
     persisted = request.get("take_profit_multiple")
@@ -1775,17 +1794,10 @@ def _managed_take_profit_multiple(
         Action.CALL_DEBIT_SPREAD.value,
         Action.PUT_DEBIT_SPREAD.value,
     }
-    high_conviction = any(
-        check.get("name") == "high_conviction_index_tier"
-        and "applied=true" in str(check.get("actual", ""))
-        for check in risk.checks_json
-        if isinstance(check, dict)
-    )
     if (
         order.environment_role == "competition"
         and opened_at.astimezone(NEW_YORK).date() == final_day
         and directional
-        and high_conviction
     ):
         return MAVERICK_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE
     return None

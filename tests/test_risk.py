@@ -15,6 +15,7 @@ from money_machine.domain.risk import (
     DAILY_LOSS_PCT,
     EARNINGS_PER_STRUCTURE_PCT,
     FINAL_DAY_DAILY_LOSS_PCT,
+    FINAL_DAY_DEFINED_LOSS_PCT,
     HIGH_CONVICTION_INDEX_PER_STRUCTURE_PCT,
     HIGH_CONVICTION_MAX_DEBIT_TO_WIDTH_RATIO,
     HIGH_CONVICTION_MIN_CONDOR_REWARD_RISK_RATIO,
@@ -28,6 +29,8 @@ from money_machine.domain.risk import (
     TOTAL_DEFINED_LOSS_PCT,
     daily_loss_pct_at,
     evaluate_risk,
+    index_cluster_pct_at,
+    total_defined_loss_pct_at,
 )
 from money_machine.domain.schemas import Candidate, ModelDecision, OptionStructure, RiskContext
 
@@ -369,10 +372,12 @@ def test_daily_loss_boundary_is_eleven_percent_only_on_final_day() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("equity", "approved"),
-    [(Decimal("88326.49"), True), (Decimal("88326.4836"), False)],
+    "equity",
+    [Decimal("88326.49"), Decimal("88326.4836")],
 )
-async def test_final_day_daily_loss_boundary_is_exact(replay_candidate, equity, approved) -> None:
+async def test_final_day_daily_loss_boundary_is_audited_but_does_not_halt_entry(
+    replay_candidate, equity
+) -> None:
     result = evaluate_risk(
         decision(replay_candidate),
         replay_candidate,
@@ -384,7 +389,7 @@ async def test_final_day_daily_loss_boundary_is_exact(replay_candidate, equity, 
         ),
     )
 
-    assert check(result, "daily_loss").passed is approved
+    assert check(result, "daily_loss").passed
     assert check(result, "daily_loss").limit == "10916.7564"
 
 
@@ -549,6 +554,52 @@ async def test_existing_managed_structure_is_never_resized_or_added_to(
     assert result.awarded_risk == Decimal("0")
     assert RiskReason.EXISTING_STRUCTURE in result.reason_codes
     assert "hard_gates_passed=false" in check(result, "high_conviction_index_tier").actual
+
+
+@pytest.mark.asyncio
+async def test_final_day_allows_only_one_additional_index_structure_and_uses_twenty_four_percent(
+    replay_candidate,
+) -> None:
+    underlying = replay_candidate.structure.underlying
+    final_day = datetime(2026, 9, 3, 16, 30, tzinfo=UTC)
+    assert index_cluster_pct_at(final_day) == FINAL_DAY_DEFINED_LOSS_PCT == Decimal("0.24")
+    assert total_defined_loss_pct_at(final_day) == Decimal("0.24")
+    shared = {
+        "now": final_day,
+        "equity": Decimal("90000"),
+        "start_of_day_equity": Decimal("100000"),
+        "peak_equity": Decimal("110000"),
+        "daily_loss_entry_halt_active": True,
+        "open_underlyings": frozenset({underlying}),
+        "index_cluster_defined_loss": Decimal("11104"),
+        "total_open_defined_loss": Decimal("11104"),
+    }
+
+    allowed = evaluate_risk(
+        decision(replay_candidate),
+        replay_candidate,
+        context(
+            **shared,
+            open_underlying_structure_counts={underlying: 1},
+        ),
+    )
+    blocked = evaluate_risk(
+        decision(replay_candidate),
+        replay_candidate,
+        context(
+            **shared,
+            open_underlying_structure_counts={underlying: 2},
+        ),
+    )
+
+    assert allowed.approved
+    assert check(allowed, "daily_loss").passed
+    assert check(allowed, "daily_loss_entry_halt").passed
+    assert check(allowed, "competition_drawdown").passed
+    assert check(allowed, "cluster_defined_loss_headroom").limit == "21600.00"
+    assert check(allowed, "total_defined_loss_headroom").limit == "21600.00"
+    assert not blocked.approved
+    assert RiskReason.EXISTING_STRUCTURE in blocked.reason_codes
 
 
 @pytest.mark.asyncio

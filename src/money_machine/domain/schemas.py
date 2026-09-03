@@ -204,6 +204,7 @@ class RiskContext(StrictModel):
     open_alpha_structures: int = Field(ge=0)
     pending_underlyings: frozenset[str] = frozenset()
     open_underlyings: frozenset[str] = frozenset()
+    open_underlying_structure_counts: dict[str, int] = Field(default_factory=dict)
     kill_switch_active: bool = False
     reconciliation_clean: bool = True
     daily_loss_entry_halt_active: bool = False

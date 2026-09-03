@@ -25,6 +25,7 @@ HIGH_CONVICTION_MIN_DIRECTIONAL_REWARD_RISK_RATIO = Decimal("2.00")
 HIGH_CONVICTION_MAX_DEBIT_TO_WIDTH_RATIO = Decimal("1") / Decimal("3")
 INDEX_CLUSTER_PCT = Decimal("0.12")
 TOTAL_DEFINED_LOSS_PCT = Decimal("0.15")
+FINAL_DAY_DEFINED_LOSS_PCT = Decimal("0.24")
 DAILY_LOSS_PCT = Decimal("0.06")
 FINAL_DAY_DAILY_LOSS_PCT = Decimal("0.11")
 COMPETITION_DRAWDOWN_PCT = Decimal("0.12")
@@ -39,6 +40,18 @@ def daily_loss_pct_at(now: datetime) -> Decimal:
     return (
         FINAL_DAY_DAILY_LOSS_PCT if now.astimezone(NEW_YORK).date() == final_day else DAILY_LOSS_PCT
     )
+
+
+def is_final_competition_day(now: datetime) -> bool:
+    return now.astimezone(NEW_YORK).date() == EOD_EQUITY_SNAPSHOT_AT.astimezone(NEW_YORK).date()
+
+
+def index_cluster_pct_at(now: datetime) -> Decimal:
+    return FINAL_DAY_DEFINED_LOSS_PCT if is_final_competition_day(now) else INDEX_CLUSTER_PCT
+
+
+def total_defined_loss_pct_at(now: datetime) -> Decimal:
+    return FINAL_DAY_DEFINED_LOSS_PCT if is_final_competition_day(now) else TOTAL_DEFINED_LOSS_PCT
 
 
 def evaluate_risk(
@@ -142,12 +155,19 @@ def evaluate_risk(
         RiskReason.INVALID_STRUCTURE,
     )
 
+    final_day_entry_override = is_final_competition_day(context.now)
     daily_loss = max(Decimal("0"), context.start_of_day_equity - context.equity)
     daily_limit = context.start_of_day_equity * daily_loss_pct_at(context.now)
-    add("daily_loss", daily_loss < daily_limit, daily_loss, daily_limit, RiskReason.DAILY_LOSS)
+    add(
+        "daily_loss",
+        final_day_entry_override or daily_loss < daily_limit,
+        daily_loss,
+        daily_limit,
+        RiskReason.DAILY_LOSS,
+    )
     add(
         "daily_loss_entry_halt",
-        not context.daily_loss_entry_halt_active,
+        final_day_entry_override or not context.daily_loss_entry_halt_active,
         context.daily_loss_entry_halt_active,
         False,
         RiskReason.DAILY_LOSS,
@@ -156,7 +176,7 @@ def evaluate_risk(
     drawdown_limit = context.peak_equity * COMPETITION_DRAWDOWN_PCT
     add(
         "competition_drawdown",
-        drawdown < drawdown_limit,
+        final_day_entry_override or drawdown < drawdown_limit,
         drawdown,
         drawdown_limit,
         RiskReason.DRAWDOWN,
@@ -166,6 +186,15 @@ def evaluate_risk(
         decision.maximum_holding_minutes,
         maximum_holding_minutes=candidate.maximum_holding_minutes or None,
         hard_deadline=candidate.holding_deadline,
+    )
+    open_underlying_count = context.open_underlying_structure_counts.get(
+        candidate.structure.underlying,
+        1 if candidate.structure.underlying in context.open_underlyings else 0,
+    )
+    final_day_additional_index_structure = (
+        final_day_entry_override
+        and candidate.structure.underlying in INDEX_UNDERLYINGS
+        and open_underlying_count == 1
     )
     add(
         "session_holding_window",
@@ -191,7 +220,8 @@ def evaluate_risk(
             f"pending_underlyings={','.join(sorted(context.pending_underlyings)) or 'none'}; "
             f"candidate_underlying={candidate.structure.underlying}"
         ),
-        "one managed-or-pending structure per underlying; cluster and total caps authoritative",
+        "one structure per underlying, except one additional index structure on 2026-09-03; "
+        "cluster and total caps authoritative",
         RiskReason.EXISTING_STRUCTURE,
     )
     add(
@@ -203,25 +233,28 @@ def evaluate_risk(
     )
     add(
         "existing_managed_structure",
-        candidate.structure.underlying not in context.open_underlyings,
-        candidate.structure.underlying in context.open_underlyings,
-        False,
+        candidate.structure.underlying not in context.open_underlyings
+        or final_day_additional_index_structure,
+        open_underlying_count,
+        "0 normally; at most 1 existing structure for the final-day index override",
         RiskReason.EXISTING_STRUCTURE,
     )
-    cluster_remaining = context.equity * INDEX_CLUSTER_PCT - context.index_cluster_defined_loss
-    total_remaining = context.equity * TOTAL_DEFINED_LOSS_PCT - context.total_open_defined_loss
+    cluster_pct = index_cluster_pct_at(context.now)
+    total_pct = total_defined_loss_pct_at(context.now)
+    cluster_remaining = context.equity * cluster_pct - context.index_cluster_defined_loss
+    total_remaining = context.equity * total_pct - context.total_open_defined_loss
     add(
         "cluster_defined_loss_headroom",
         cluster_remaining > 0,
         cluster_remaining,
-        context.equity * INDEX_CLUSTER_PCT,
+        context.equity * cluster_pct,
         RiskReason.CLUSTER_CAP,
     )
     add(
         "total_defined_loss_headroom",
         total_remaining > 0,
         total_remaining,
-        context.equity * TOTAL_DEFINED_LOSS_PCT,
+        context.equity * total_pct,
         RiskReason.TOTAL_CAP,
     )
 
@@ -260,7 +293,7 @@ def evaluate_risk(
     tier_thresholds_met = condor_tier_thresholds_met or directional_tier_thresholds_met
     hard_gates_passed = all(check.passed for check in checks)
     high_conviction_applied = tier_thresholds_met and hard_gates_passed
-    final_competition_day = daily_loss_pct_at(context.now) == FINAL_DAY_DAILY_LOSS_PCT
+    final_competition_day = is_final_competition_day(context.now)
     maverick_signal_confirmed = candidate.candidate_id in context.maverick_candidate_ids
     maverick_applied = (
         directional_tier_thresholds_met

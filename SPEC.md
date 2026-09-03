@@ -355,8 +355,10 @@ Competition limits:
   richness never qualifies a debit spread for larger sizing because it can reflect expensive
   option premium. Earnings candidates are never eligible for this tier.
 - Maximum loss per earnings structure: 0.35% of current equity.
-- Maximum combined SPY/QQQ/IWM cluster loss: 12.00% of current equity.
-- Maximum total concurrent defined loss: 15.00% of current equity.
+- Maximum combined SPY/QQQ/IWM cluster loss: 12.00% of current equity normally; 24.00% for the
+  explicitly authorized 2026-09-03 final-day session.
+- Maximum total concurrent defined loss: 15.00% of current equity normally; 24.00% for the
+  explicitly authorized 2026-09-03 final-day session.
 - Daily realized plus unrealized loss stop: 6.00% of start-of-day equity, with an explicitly
   bounded Thursday-only final-day boundary of 11.00%.
 - A raw daily-loss breach freezes new entries immediately. Liquidation of a clean, fully
@@ -366,19 +368,20 @@ Competition limits:
   credible liquidation signal. A validated breach latches the entry halt through the UTC
   session; reconciliation and other structural safety incidents retain immediate close authority.
 - Competition peak-to-trough drawdown stop: 12.00%.
-- Maximum one managed or pending alpha structure per underlying. Raw parent-order count is not
-  an independent veto; authoritative 12.00% correlated-cluster and 15.00% total defined-loss caps
-  remain final portfolio limits.
+- Maximum one managed or pending alpha structure per underlying normally. On 2026-09-03 only, at
+  most one additional independently validated index structure may be added per already-used
+  underlying. Raw parent-order count is not an independent veto; effective correlated-cluster and
+  total defined-loss caps remain final portfolio limits.
 - Maximum one pending entry per underlying.
-- No pyramiding, adding to, or resizing an existing managed structure.
+- No resizing an existing managed structure. Pyramiding remains forbidden except for the explicit
+  2026-09-03 one-additional-index-structure rule above.
 - No naked legs.
 - No market orders for multi-leg entries or exits under normal operation.
 - No quantity increase after an adverse move.
-- On the Thursday final day, high-conviction index directional debit spreads take profit when
-  fresh executable closing quotes reach 2.10 times opening debit, including positions opened
-  before this rule was deployed when their persisted Risk Decision proves that tier. Other
-  competition directional debit spreads retain the 1.35 multiple, other debit strategies retain
-  1.50, and the directional 0.65 premium-value stop is unchanged.
+- On the Thursday final day, every index directional debit spread takes profit when fresh
+  executable closing quotes reach 2.10 times opening debit, including positions opened before
+  this rule was deployed. Other competition directional debit spreads retain the 1.35 multiple,
+  other debit strategies retain 1.50, and the directional 0.65 premium-value stop is unchanged.
 - The final-day directional playbook rotates deterministically after 45 minutes. Decision
   Passports persist the flat/no-entry clock and each open structure's elapsed time and best
   executable progress. A setup that remains flat and unproductive for the full interval is
@@ -389,6 +392,9 @@ Competition limits:
   after a trade, exit, or return to flat. Each Passport reports the running loss even below the
   latch. At the $99,243.24 Thursday start, the authorized 11% boundary is $10,916.76 and blocks
   further entries at about $88,326.48 after confirmation.
+- On 2026-09-03 only, the daily-loss and competition-drawdown checks remain audited but do not
+  veto a new entry. Their deterministic emergency-exit handling remains active. This override
+  expires at the official equity lock and does not alter other sessions.
 - On Thursday only, one fresh high-conviction SPY/QQQ/IWM directional debit spread may use up to
   12% of current equity, never exceeding the existing 12% index-cluster cap and only while the
   cluster is flat. It requires every normal hard gate plus at least 0.10 percentage point of

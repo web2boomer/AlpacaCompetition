@@ -29,6 +29,7 @@ from money_machine.domain.risk import (
     DAILY_LOSS_PCT,
     daily_loss_pct_at,
     evaluate_risk,
+    is_final_competition_day,
 )
 from money_machine.domain.schemas import (
     AuctionResult,
@@ -359,7 +360,7 @@ class AgentService:
                 market_open=market_open,
                 allow_new_entries=(
                     execution_state is ExecutionState.FULL_EXECUTION
-                    and daily_control.status == "clear"
+                    and (daily_control.status == "clear" or is_final_competition_day(now))
                 ),
                 positions=list(positions),
                 chains=chains,
@@ -400,6 +401,8 @@ class AgentService:
                 report.candidates,
                 pending_underlyings=risk_summary["pending_underlyings"],
                 open_underlyings=risk_summary["open_underlyings"],
+                open_underlying_structure_counts=risk_summary["open_underlying_structure_counts"],
+                now=now,
             )
             directional_exclusions, directional_confirmation = (
                 _directional_policy_exclusions(
@@ -488,9 +491,13 @@ class AgentService:
                 open_alpha_structures=risk_summary["open_alpha_structures"],
                 pending_underlyings=risk_summary["pending_underlyings"],
                 open_underlyings=risk_summary["open_underlyings"],
+                open_underlying_structure_counts=risk_summary["open_underlying_structure_counts"],
                 kill_switch_active=bool(operational.get("kill_switch_active", False)),
                 reconciliation_clean=reconciliation_clean,
-                daily_loss_entry_halt_active=daily_control.status in {"provisional", "latched"},
+                daily_loss_entry_halt_active=(
+                    daily_control.status in {"provisional", "latched"}
+                    and not is_final_competition_day(now)
+                ),
                 maverick_candidate_ids=frozenset(
                     candidate_id
                     for candidate_id, item in directional_confirmation.items()
@@ -979,11 +986,7 @@ def _risk_check_applied(risk: Any, name: str) -> bool:
 def _entry_take_profit_multiple(*, risk: Any, selected: Candidate, now: datetime) -> Decimal | None:
     final_competition_day = daily_loss_pct_at(now) > DAILY_LOSS_PCT
     directional = selected.action in {Action.CALL_DEBIT_SPREAD, Action.PUT_DEBIT_SPREAD}
-    if (
-        final_competition_day
-        and directional
-        and _risk_check_applied(risk, "high_conviction_index_tier")
-    ):
+    if final_competition_day and directional:
         return MAVERICK_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE
     if _risk_check_applied(risk, "maverick_final_day_tier"):
         return MAVERICK_DIRECTIONAL_DEBIT_TAKE_PROFIT_MULTIPLE
@@ -1142,6 +1145,8 @@ def _portfolio_candidate_exclusions(
     *,
     pending_underlyings: frozenset[str],
     open_underlyings: frozenset[str],
+    open_underlying_structure_counts: dict[str, int],
+    now: datetime,
 ) -> dict[str, tuple[str, ...]]:
     exclusions: dict[str, tuple[str, ...]] = {}
     for candidate in candidates:
@@ -1149,7 +1154,12 @@ def _portfolio_candidate_exclusions(
         reasons: list[str] = []
         if underlying in pending_underlyings:
             reasons.append("pending_entry_for_underlying")
-        if underlying in open_underlyings:
+        final_day_additional_index_structure = (
+            is_final_competition_day(now)
+            and underlying in UNIVERSE
+            and open_underlying_structure_counts.get(underlying, 1) == 1
+        )
+        if underlying in open_underlyings and not final_day_additional_index_structure:
             reasons.append("existing_managed_structure_for_underlying")
         if reasons:
             exclusions[candidate.candidate_id] = tuple(reasons)

@@ -40,14 +40,15 @@ positions or orders as part of deployment verification.
 ## Standing final-day authorization
 
 Alex has authorized the Thursday-only final-day recovery policy without repeated discretionary
-confirmation gates: an 11% daily-loss boundary against the fixed session baseline, and one
-qualifying high-conviction SPY/QQQ/IWM directional debit spread sized up to 12% of current equity
-within the 12% correlated-index cluster cap. Thursday high-conviction directional exposure uses
-a 2.10-times opening-debit take-profit, a 0.65-times premium-value stop, and a 45-minute maximum
-hold. The one-shot 12% sizing tier additionally requires no concurrent correlated-index exposure.
+confirmation gates. For the remainder of 2026-09-03, daily-loss and competition-drawdown states
+do not halt new entries, while their emergency-exit evidence remains active. Correlated-index and
+total defined-loss caps are both 24% of current equity. At most one additional independently
+validated atomic defined-risk structure may be added per already-used SPY/QQQ/IWM underlying.
+Every Thursday directional debit spread uses a 2.10-times opening-debit take-profit, a 0.65-times
+premium-value stop, and a 45-minute maximum hold.
 
 This authorization never weakens the official-account and paper-only guards, atomic defined-risk
 MLEG requirement, deterministic caps, reconciliation, liquidity, data, event, lifecycle,
-idempotency, no-pyramiding, cutoff, forced-flatten, or emergency controls. Agents must not invent
-an additional approval pause when those deterministic gates pass, and must not add risk beyond
-their limits.
+idempotency, the one-additional-structure ceiling, 14:30 entry cutoff, 15:15 forced flatten, 15:45
+flat target, 16:00 equity lock, or emergency controls. Agents must not invent an additional
+approval pause when those deterministic gates pass, and must not add risk beyond their limits.

@@ -24,7 +24,6 @@ from money_machine.persistence.models import (
     EquitySnapshotORM,
     FillORM,
     MarketSnapshotORM,
-    RiskDecisionORM,
 )
 from money_machine.persistence.repository import DirectionalStopRecord, PriorMarketObservation
 from money_machine.safety import configured_account_fingerprint
@@ -32,6 +31,7 @@ from money_machine.service import (
     AgentService,
     _directional_policy_exclusions,
     _entry_take_profit_multiple,
+    _portfolio_candidate_exclusions,
 )
 from money_machine.settings import Settings
 
@@ -212,6 +212,41 @@ def test_final_day_high_conviction_directional_entry_uses_two_point_ten(
     )
 
 
+def test_final_day_selector_allows_only_one_additional_structure_per_index_underlying(
+    directional_candidate,
+) -> None:
+    final_day = datetime(2026, 9, 3, 16, 30, tzinfo=UTC)
+    underlying = directional_candidate.structure.underlying
+
+    allowed = _portfolio_candidate_exclusions(
+        (directional_candidate,),
+        pending_underlyings=frozenset(),
+        open_underlyings=frozenset({underlying}),
+        open_underlying_structure_counts={underlying: 1},
+        now=final_day,
+    )
+    blocked = _portfolio_candidate_exclusions(
+        (directional_candidate,),
+        pending_underlyings=frozenset(),
+        open_underlyings=frozenset({underlying}),
+        open_underlying_structure_counts={underlying: 2},
+        now=final_day,
+    )
+    pending = _portfolio_candidate_exclusions(
+        (directional_candidate,),
+        pending_underlyings=frozenset({underlying}),
+        open_underlyings=frozenset({underlying}),
+        open_underlying_structure_counts={underlying: 1},
+        now=final_day,
+    )
+
+    assert allowed == {}
+    assert blocked[directional_candidate.candidate_id] == (
+        "existing_managed_structure_for_underlying",
+    )
+    assert pending[directional_candidate.candidate_id] == ("pending_entry_for_underlying",)
+
+
 @pytest.mark.asyncio
 async def test_existing_final_day_high_conviction_directional_uses_two_point_ten(
     settings, repository, replay_adapter
@@ -227,22 +262,12 @@ async def test_existing_final_day_high_conviction_directional_uses_two_point_ten
         order = session.scalar(
             select(BrokerOrderORM).where(BrokerOrderORM.agent_run_id == opened.run_id)
         )
-        risk = session.scalar(
-            select(RiskDecisionORM).where(RiskDecisionORM.agent_run_id == opened.run_id)
-        )
         assert order is not None
-        assert risk is not None
         order.environment_role = "competition"
         order.submitted_at = datetime(2026, 9, 3, 16, 15, tzinfo=UTC)
         request = order.raw_json["request"]
         request["take_profit_multiple"] = None
         order.raw_json = {**order.raw_json, "request": request}
-        risk.checks_json = [
-            {
-                "name": "high_conviction_index_tier",
-                "actual": "applied=true; tier=high_conviction_index",
-            }
-        ]
 
     managed = repository.open_managed_structures()[0]
 
@@ -693,6 +718,7 @@ def live_style_risk_summary(*, open_underlyings, pending_underlyings=frozenset()
         "open_alpha_structures": 5,
         "pending_underlyings": pending_underlyings,
         "open_underlyings": open_underlyings,
+        "open_underlying_structure_counts": {underlying: 1 for underlying in open_underlyings},
     }
 
 
