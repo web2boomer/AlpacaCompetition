@@ -390,11 +390,13 @@ Competition limits:
   persisted neutral or opposite signal is followed by the normal two-cycle reconfirmation.
 - Thursday's daily-loss baseline is the first clean regular-session account mark and never resets
   after a trade, exit, or return to flat. Each Passport reports the running loss even below the
-  latch. At the $99,243.24 Thursday start, the authorized 11% boundary is $10,916.76 and blocks
-  further entries at about $88,326.48 after confirmation.
-- On 2026-09-03 only, the daily-loss and competition-drawdown checks remain audited but do not
-  veto a new entry. Their deterministic emergency-exit handling remains active. This override
-  expires at the official equity lock and does not alter other sessions.
+  latch. At the $99,243.24 Thursday start, the authorized 11% boundary is $10,916.76 and is
+  reported at about $88,326.48 after confirmation without overriding the final-day policy below.
+- On 2026-09-03 only, the daily-loss and competition-drawdown checks remain audited but neither
+  veto a new entry nor force portfolio liquidation merely because those loss thresholds remain
+  breached. Reconciliation-safety exits, per-structure 0.65 premium-value stops, 2.10 targets,
+  45-minute maximum holds, and the forced-flatten schedule remain active. This override expires
+  at the official equity lock and does not alter other sessions.
 - On Thursday only, one fresh high-conviction SPY/QQQ/IWM directional debit spread may use up to
   12% of current equity, never exceeding the existing 12% index-cluster cap and only while the
   cluster is flat. It requires every normal hard gate plus at least 0.10 percentage point of

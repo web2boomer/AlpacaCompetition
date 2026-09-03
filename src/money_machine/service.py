@@ -328,15 +328,23 @@ class AgentService:
             account_checkpoint_persisted = True
             safety_equity = min(raw_account.equity, account.equity)
             drawdown = max(Decimal("0"), peak_equity - safety_equity)
-            portfolio_exit_reason = (
-                "competition_drawdown_limit"
-                if drawdown >= peak_equity * COMPETITION_DRAWDOWN_PCT
-                else "reconciliation_safety_incident"
-                if not reconciliation_clean and raw_daily_loss >= daily_limit
-                else "daily_loss_limit"
-                if daily_control.status == "latched"
-                else None
-            )
+            final_day_portfolio_loss_override = is_final_competition_day(now)
+            if final_day_portfolio_loss_override:
+                portfolio_exit_reason = (
+                    "reconciliation_safety_incident"
+                    if not reconciliation_clean and raw_daily_loss >= daily_limit
+                    else None
+                )
+            else:
+                portfolio_exit_reason = (
+                    "competition_drawdown_limit"
+                    if drawdown >= peak_equity * COMPETITION_DRAWDOWN_PCT
+                    else "reconciliation_safety_incident"
+                    if not reconciliation_clean and raw_daily_loss >= daily_limit
+                    else "daily_loss_limit"
+                    if daily_control.status == "latched"
+                    else None
+                )
             daily_loss_evidence = {
                 "status": daily_control.status,
                 "entry_halt_active": daily_control.status in {"provisional", "latched"},
@@ -350,6 +358,8 @@ class AgentService:
                 "quote_quality_passed": mark_quality_passed,
                 "quote_quality_reason": mark_quality_reason,
                 "reason": daily_control.reason,
+                "portfolio_loss_exit_override_applied": final_day_portfolio_loss_override,
+                "portfolio_exit_reason": portfolio_exit_reason,
             }
             lifecycle_events, lifecycle_incidents = await self._maintain_order_lifecycle(
                 adapter=adapter,

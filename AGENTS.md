@@ -41,11 +41,12 @@ positions or orders as part of deployment verification.
 
 Alex has authorized the Thursday-only final-day recovery policy without repeated discretionary
 confirmation gates. For the remainder of 2026-09-03, daily-loss and competition-drawdown states
-do not halt new entries, while their emergency-exit evidence remains active. Correlated-index and
-total defined-loss caps are both 24% of current equity. At most one additional independently
-validated atomic defined-risk structure may be added per already-used SPY/QQQ/IWM underlying.
-Every Thursday directional debit spread uses a 2.10-times opening-debit take-profit, a 0.65-times
-premium-value stop, and a 45-minute maximum hold.
+remain audited but neither halt new entries nor force portfolio liquidation merely because those
+loss thresholds remain breached. Reconciliation-safety exits and every position-specific exit
+remain active. Correlated-index and total defined-loss caps are both 24% of current equity. At most
+one additional independently validated atomic defined-risk structure may be added per already-used
+SPY/QQQ/IWM underlying. Every Thursday directional debit spread uses a 2.10-times opening-debit
+take-profit, a 0.65-times premium-value stop, and a 45-minute maximum hold.
 
 This authorization never weakens the official-account and paper-only guards, atomic defined-risk
 MLEG requirement, deterministic caps, reconciliation, liquidity, data, event, lifecycle,

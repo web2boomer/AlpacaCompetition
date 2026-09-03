@@ -1991,6 +1991,92 @@ async def test_two_credible_breaches_with_fresh_complete_quotes_latch_and_close(
 
 
 @pytest.mark.asyncio
+async def test_final_day_portfolio_loss_is_audited_without_forced_liquidation(
+    settings, repository, replay_adapter, monkeypatch
+) -> None:
+    await seed_managed_position(settings, repository, replay_adapter)
+    before = len(replay_adapter.submitted_requests)
+    cycle_at = datetime(2026, 9, 3, 17, 5, tzinfo=UTC)
+    with repository.database.session() as session:
+        managed_order = session.scalar(select(BrokerOrderORM).limit(1))
+        assert managed_order is not None
+        managed_order.submitted_at = cycle_at - timedelta(minutes=5)
+    for symbol, chain in replay_adapter.data["chains"].items():
+        if symbol != "QQQ":
+            chain.clear()
+            continue
+        for quote in chain:
+            quote["observed_at"] = cycle_at.isoformat()
+    accounts = iter((account_at("87000.00"), account_at("87000.00")))
+
+    async def sequenced_account() -> AccountSnapshot:
+        return next(accounts)
+
+    monkeypatch.setattr(replay_adapter, "account", sequenced_account)
+    outcome = await AgentService(
+        production_settings(settings),
+        repository,
+        daily_loss_confirmation_delay_seconds=0,
+    ).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=cycle_at,
+        mode=RunMode.LIVE,
+    )
+
+    control = outcome.passport["daily_loss_control"]
+    assert control["entry_halt_active"] is True
+    assert control["portfolio_loss_exit_override_applied"] is True
+    assert control["portfolio_exit_reason"] is None
+    assert len(replay_adapter.submitted_requests) == before
+    assert not any(
+        event.get("event") == "position_close_submitted"
+        for event in outcome.passport["operational_state"]["lifecycle_events"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_final_day_reconciliation_loss_incident_still_forces_liquidation(
+    settings, repository, replay_adapter, monkeypatch
+) -> None:
+    await seed_managed_position(settings, repository, replay_adapter)
+    cycle_at = datetime(2026, 9, 3, 17, 5, tzinfo=UTC)
+    with repository.database.session() as session:
+        managed_order = session.scalar(select(BrokerOrderORM).limit(1))
+        assert managed_order is not None
+        managed_order.submitted_at = cycle_at - timedelta(minutes=5)
+    for chain in replay_adapter.data["chains"].values():
+        for quote in chain:
+            quote["observed_at"] = cycle_at.isoformat()
+    replay_adapter.data["account"].update(equity="87000.00", portfolio_value="87000.00")
+    monkeypatch.setattr(
+        repository,
+        "reconcile_broker_state",
+        lambda *_args, **_kwargs: (False, ("test_reconciliation_incident",)),
+    )
+
+    outcome = await AgentService(
+        production_settings(settings),
+        repository,
+        daily_loss_confirmation_delay_seconds=0,
+    ).run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=cycle_at,
+        mode=RunMode.LIVE,
+    )
+
+    control = outcome.passport["daily_loss_control"]
+    assert control["portfolio_loss_exit_override_applied"] is True
+    assert control["portfolio_exit_reason"] == "reconciliation_safety_incident"
+    assert replay_adapter.submitted_requests[-1].is_closing
+    assert any(
+        event.get("reason") == "reconciliation_safety_incident"
+        for event in outcome.passport["operational_state"]["lifecycle_events"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_stale_quotes_freeze_entries_without_forced_liquidation(
     settings, repository, replay_adapter, monkeypatch
 ) -> None:
