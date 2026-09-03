@@ -680,6 +680,14 @@ class AgentService:
         active_closing_candidates: set[str] = set()
         freshly_filled_entry_candidates: set[str] = set()
         quote_map = {quote.symbol: quote for chain in chains.values() for quote in chain}
+        signed_position_quantities = {
+            str(position.get("symbol")): Decimal(str(position.get("qty") or 0))
+            for position in positions
+            if position.get("symbol") and Decimal(str(position.get("qty") or 0)) != 0
+        }
+        position_quantities = {
+            symbol: abs(quantity) for symbol, quantity in signed_position_quantities.items()
+        }
         for candidate_id in self.repository.reconcile_filled_closing_parents(now=now):
             events.append(
                 {
@@ -717,16 +725,25 @@ class AgentService:
                         reported_filled is not None
                         and Decimal(str(reported_filled)) != Decimal(order.quantity)
                     )
-                    position_symbols = {
-                        str(position.get("symbol"))
-                        for position in positions
-                        if Decimal(str(position.get("qty") or 0)) != 0
+                    expected_after_close: dict[str, Decimal] = {}
+                    for managed in self.repository.open_managed_structures():
+                        if managed.client_order_id == order.parent_client_order_id:
+                            continue
+                        for leg in managed.structure.legs:
+                            direction = Decimal("1") if leg.side.value == "buy" else Decimal("-1")
+                            expected_after_close[leg.symbol] = expected_after_close.get(
+                                leg.symbol, Decimal("0")
+                            ) + (direction * managed.quantity * leg.ratio_qty)
+                    expected_after_close = {
+                        symbol: quantity
+                        for symbol, quantity in expected_after_close.items()
+                        if quantity != 0
                     }
-                    residual_legs = position_symbols.intersection(leg.symbol for leg in order.legs)
+                    residual_inventory_mismatch = signed_position_quantities != expected_after_close
                     if quantity_mismatch:
                         incidents.append("mismatched_filled_close_quantity")
                         active_closing_candidates.add(order.candidate_id.removesuffix(":close"))
-                    elif residual_legs:
+                    elif residual_inventory_mismatch:
                         incidents.append("filled_close_residual_positions")
                         active_closing_candidates.add(order.candidate_id.removesuffix(":close"))
                     else:
@@ -869,11 +886,6 @@ class AgentService:
                 }
             )
 
-        position_quantities = {
-            str(position.get("symbol")): abs(Decimal(str(position.get("qty") or 0)))
-            for position in positions
-            if position.get("symbol")
-        }
         for managed in self.repository.open_managed_structures():
             if managed.candidate_id in freshly_filled_entry_candidates:
                 continue

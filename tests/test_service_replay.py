@@ -1438,6 +1438,63 @@ async def test_filled_close_refresh_prevents_already_filled_cancel_regression(
 
 
 @pytest.mark.asyncio
+async def test_filled_close_allows_residual_positions_owned_by_overlapping_sibling(
+    settings, repository, replay_adapter, monkeypatch
+) -> None:
+    service, close_request, close_broker_id = await seed_pending_close(
+        settings, repository, replay_adapter
+    )
+    with repository.database.session() as session:
+        parent = session.scalar(
+            select(BrokerOrderORM).where(
+                BrokerOrderORM.client_order_id == close_request.parent_client_order_id
+            )
+        )
+        assert parent is not None
+        session.add(
+            BrokerOrderORM(
+                agent_run_id=parent.agent_run_id,
+                candidate_id=parent.candidate_id,
+                client_order_id="mm-comp-overlapping-open-sibling",
+                broker_order_id="broker-overlapping-open-sibling",
+                status="filled",
+                quantity=parent.quantity,
+                limit_price=parent.limit_price,
+                environment_role=parent.environment_role,
+                attempt=0,
+                submitted_at=parent.submitted_at,
+                last_seen_at=parent.last_seen_at,
+                raw_json=parent.raw_json,
+            )
+        )
+    repository.set_kill_switch(active=True, now=replay_adapter.observed_at)
+
+    async def filled_close(broker_order_id: str):
+        assert broker_order_id == close_broker_id
+        return {
+            "status": "filled",
+            "qty": str(close_request.quantity),
+            "filled_qty": str(close_request.quantity),
+        }
+
+    monkeypatch.setattr(replay_adapter, "order_by_id", filled_close)
+    outcome = await service.run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at + timedelta(minutes=5),
+        mode=RunMode.LIVE,
+    )
+
+    assert outcome.passport["operational_state"]["reconciliation_clean"] is True
+    assert (
+        "filled_close_residual_positions" not in outcome.passport["operational_state"]["incidents"]
+    )
+    managed = repository.open_managed_structures()
+    assert len(managed) == 1
+    assert managed[0].client_order_id == "mm-comp-overlapping-open-sibling"
+
+
+@pytest.mark.asyncio
 async def test_flat_filled_close_accepts_parent_already_closed_by_position_absence(
     settings, repository, replay_adapter, monkeypatch
 ) -> None:
