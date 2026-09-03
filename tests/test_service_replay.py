@@ -30,6 +30,7 @@ from money_machine.safety import configured_account_fingerprint
 from money_machine.service import (
     FINAL_DAY_PROFIT_TARGET_EQUITY,
     AgentService,
+    _cycle_key,
     _directional_policy_exclusions,
     _entry_take_profit_multiple,
     _portfolio_candidate_exclusions,
@@ -49,6 +50,12 @@ def production_settings(settings) -> Settings:
         alpaca_expected_account_id=SecretStr("REPLAY-PAPER-ACCOUNT"),
         client_order_prefix="mm-comp",
     )
+
+
+def test_final_window_cycle_key_is_one_minute() -> None:
+    first = datetime(2026, 9, 3, 19, 43, tzinfo=UTC)
+    second = first + timedelta(minutes=1)
+    assert _cycle_key(first, RunMode.LIVE) != _cycle_key(second, RunMode.LIVE)
 
 
 def test_portfolio_peak_uses_only_regular_market_competition_marks(repository) -> None:

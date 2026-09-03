@@ -1046,7 +1046,8 @@ class AgentService:
 
 
 def _cycle_key(now: datetime, mode: RunMode) -> str:
-    bucket_minutes = 1 if now >= FORCED_FLATTEN_STARTS_AT else 5
+    final_window = FINAL_HOUR_RECOVERY_STARTS_AT <= now <= EOD_EQUITY_SNAPSHOT_AT
+    bucket_minutes = 1 if final_window or now >= FORCED_FLATTEN_STARTS_AT else 5
     minute = now.minute - now.minute % bucket_minutes
     bucket = now.replace(minute=minute, second=0, microsecond=0)
     return f"{mode.value}:{bucket.isoformat()}"
