@@ -678,6 +678,7 @@ class AgentService:
         events: list[dict[str, Any]] = []
         incidents: list[str] = []
         active_closing_candidates: set[str] = set()
+        freshly_filled_entry_candidates: set[str] = set()
         quote_map = {quote.symbol: quote for chain in chains.values() for quote in chain}
         for candidate_id in self.repository.reconcile_filled_closing_parents(now=now):
             events.append(
@@ -690,58 +691,69 @@ class AgentService:
         if clock.flat_target_reached and (positions or self.repository.pending_managed_orders()):
             incidents.append("flat_target_exposure_remaining")
         for order in self.repository.pending_managed_orders():
-            if order.is_closing:
-                broker_order = await adapter.order_by_id(order.broker_order_id)
-                broker_status = str(broker_order.get("status") or "").lower()
-                if broker_status in {"canceled", "expired", "filled", "rejected"}:
-                    self.repository.mark_order_status(
-                        order.client_order_id, status=broker_status, now=now
+            broker_order = await adapter.order_by_id(order.broker_order_id)
+            broker_status = str(broker_order.get("status") or "").lower()
+            if broker_status in {"canceled", "expired", "filled", "rejected"}:
+                terminal_status = broker_status
+                reported_filled = broker_order.get("filled_qty")
+                if (
+                    not order.is_closing
+                    and broker_status != "filled"
+                    and reported_filled is not None
+                    and Decimal(str(reported_filled)) > 0
+                ):
+                    terminal_status = "partially_filled_canceled"
+                self.repository.mark_order_status(
+                    order.client_order_id, status=terminal_status, now=now
+                )
+                if not order.is_closing and broker_status == "filled":
+                    freshly_filled_entry_candidates.add(order.candidate_id)
+                if order.is_closing and broker_status == "filled":
+                    reported_quantity = broker_order.get("qty")
+                    quantity_mismatch = (
+                        reported_quantity is not None
+                        and Decimal(str(reported_quantity)) != Decimal(order.quantity)
+                    ) or (
+                        reported_filled is not None
+                        and Decimal(str(reported_filled)) != Decimal(order.quantity)
                     )
-                    if broker_status == "filled":
-                        reported_quantity = broker_order.get("qty")
-                        reported_filled = broker_order.get("filled_qty")
-                        quantity_mismatch = (
-                            reported_quantity is not None
-                            and Decimal(str(reported_quantity)) != Decimal(order.quantity)
-                        ) or (
-                            reported_filled is not None
-                            and Decimal(str(reported_filled)) != Decimal(order.quantity)
+                    position_symbols = {
+                        str(position.get("symbol"))
+                        for position in positions
+                        if Decimal(str(position.get("qty") or 0)) != 0
+                    }
+                    residual_legs = position_symbols.intersection(leg.symbol for leg in order.legs)
+                    if quantity_mismatch:
+                        incidents.append("mismatched_filled_close_quantity")
+                        active_closing_candidates.add(order.candidate_id.removesuffix(":close"))
+                    elif residual_legs:
+                        incidents.append("filled_close_residual_positions")
+                        active_closing_candidates.add(order.candidate_id.removesuffix(":close"))
+                    else:
+                        parent_closed = self.repository.mark_managed_structure_closed(
+                            order.candidate_id.removesuffix(":close"),
+                            now=now,
+                            parent_client_order_id=order.parent_client_order_id,
+                            expected_quantity=order.quantity,
                         )
-                        position_symbols = {
-                            str(position.get("symbol"))
-                            for position in positions
-                            if Decimal(str(position.get("qty") or 0)) != 0
-                        }
-                        residual_legs = position_symbols.intersection(
-                            leg.symbol for leg in order.legs
-                        )
-                        if quantity_mismatch:
-                            incidents.append("mismatched_filled_close_quantity")
-                            active_closing_candidates.add(order.candidate_id.removesuffix(":close"))
-                        elif residual_legs:
-                            incidents.append("filled_close_residual_positions")
-                            active_closing_candidates.add(order.candidate_id.removesuffix(":close"))
-                        else:
-                            parent_closed = self.repository.mark_managed_structure_closed(
-                                order.candidate_id.removesuffix(":close"),
-                                now=now,
-                                parent_client_order_id=order.parent_client_order_id,
-                                expected_quantity=order.quantity,
-                            )
-                            if not parent_closed:
-                                incidents.append("ambiguous_filled_close_parent")
-                    events.append(
-                        {
-                            "event": "closing_order_terminal_reconciled",
-                            "status": broker_status,
-                            "remaining_quantity": order.remaining_quantity,
-                        }
-                    )
-                    continue
-                if order.parent_client_order_id is None:
-                    incidents.append("ambiguous_closing_order_parent")
-                    active_closing_candidates.add(order.candidate_id.removesuffix(":close"))
-                    continue
+                        if not parent_closed:
+                            incidents.append("ambiguous_filled_close_parent")
+                events.append(
+                    {
+                        "event": (
+                            "closing_order_terminal_reconciled"
+                            if order.is_closing
+                            else "entry_order_terminal_reconciled"
+                        ),
+                        "status": terminal_status,
+                        "remaining_quantity": order.remaining_quantity,
+                    }
+                )
+                continue
+            if order.is_closing and order.parent_client_order_id is None:
+                incidents.append("ambiguous_closing_order_parent")
+                active_closing_candidates.add(order.candidate_id.removesuffix(":close"))
+                continue
             cutoff_cancel = not order.is_closing and not allow_new_entries
             urgent_close = bool(
                 order.is_closing
@@ -863,6 +875,8 @@ class AgentService:
             if position.get("symbol")
         }
         for managed in self.repository.open_managed_structures():
+            if managed.candidate_id in freshly_filled_entry_candidates:
+                continue
             if managed.candidate_id in active_closing_candidates:
                 continue
             leg_symbols = [leg.symbol for leg in managed.structure.legs]

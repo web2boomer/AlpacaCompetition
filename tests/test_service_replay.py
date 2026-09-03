@@ -1070,7 +1070,7 @@ async def test_next_window_with_stale_data_abstains(settings, repository, replay
 @pytest.mark.asyncio
 @pytest.mark.parametrize("broker_status", ["submitted", "pending_new", "new"])
 async def test_stale_entry_is_canceled_and_replaced_with_bounded_concession(
-    settings, repository, replay_adapter, broker_status
+    settings, repository, replay_adapter, monkeypatch, broker_status
 ) -> None:
     service = AgentService(settings, repository)
     first = await service.run_cycle(
@@ -1086,6 +1086,11 @@ async def test_stale_entry_is_canceled_and_replaced_with_bounded_concession(
         assert order is not None
         order.status = broker_status
 
+    async def pending_order(_broker_order_id: str):
+        return {"status": broker_status}
+
+    monkeypatch.setattr(replay_adapter, "order_by_id", pending_order)
+
     second = await service.run_cycle(
         adapter=replay_adapter,
         model=ReplayModelProvider(),
@@ -1097,6 +1102,104 @@ async def test_stale_entry_is_canceled_and_replaced_with_bounded_concession(
     assert any(
         event["event"] == "order_replaced_with_bounded_concession"
         for event in second.passport["operational_state"]["lifecycle_events"]
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("broker_status", ["filled", "canceled", "expired", "rejected"])
+async def test_terminal_pending_entry_is_refreshed_without_cancel_or_replacement(
+    settings, repository, replay_adapter, monkeypatch, broker_status
+) -> None:
+    service = AgentService(settings, repository)
+    first = await service.run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at,
+        mode=RunMode.REPLAY,
+    )
+    with repository.database.session() as session:
+        order = session.scalar(
+            select(BrokerOrderORM).where(BrokerOrderORM.agent_run_id == first.run_id)
+        )
+        assert order is not None
+        order.status = "pending_new"
+
+    async def terminal_order(_broker_order_id: str):
+        return {
+            "status": broker_status,
+            "qty": "1",
+            "filled_qty": "1" if broker_status == "filled" else "0",
+        }
+
+    async def cancel_must_not_run(_broker_order_id: str):
+        raise AssertionError("terminal broker order must not be canceled")
+
+    monkeypatch.setattr(replay_adapter, "order_by_id", terminal_order)
+    monkeypatch.setattr(replay_adapter, "cancel_order", cancel_must_not_run)
+    repository.set_kill_switch(active=True, now=replay_adapter.observed_at)
+    request_count = len(replay_adapter.submitted_requests)
+
+    outcome = await service.run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at + timedelta(minutes=5),
+        mode=RunMode.REPLAY,
+    )
+
+    assert outcome.passport.get("status") != "failed_closed"
+    assert len(replay_adapter.submitted_requests) == request_count
+    assert any(
+        event["event"] == "entry_order_terminal_reconciled" and event["status"] == broker_status
+        for event in outcome.passport["operational_state"]["lifecycle_events"]
+    )
+    with repository.database.session() as session:
+        order = session.scalar(
+            select(BrokerOrderORM).where(BrokerOrderORM.agent_run_id == first.run_id)
+        )
+        assert order is not None
+        assert order.status == broker_status
+
+
+@pytest.mark.asyncio
+async def test_filled_entry_refresh_prevents_already_filled_cancel_regression(
+    settings, repository, replay_adapter, monkeypatch
+) -> None:
+    service = AgentService(settings, repository)
+    first = await service.run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at,
+        mode=RunMode.REPLAY,
+    )
+    with repository.database.session() as session:
+        order = session.scalar(
+            select(BrokerOrderORM).where(BrokerOrderORM.agent_run_id == first.run_id)
+        )
+        assert order is not None
+        order.status = "pending_new"
+
+    async def filled_order(_broker_order_id: str):
+        return {"status": "filled", "qty": "1", "filled_qty": "1"}
+
+    async def cancel_would_raise_422(_broker_order_id: str):
+        raise AssertionError('cancel would reproduce Alpaca 422 "order is already filled"')
+
+    monkeypatch.setattr(replay_adapter, "order_by_id", filled_order)
+    monkeypatch.setattr(replay_adapter, "cancel_order", cancel_would_raise_422)
+    repository.set_kill_switch(active=True, now=replay_adapter.observed_at)
+
+    outcome = await service.run_cycle(
+        adapter=replay_adapter,
+        model=ReplayModelProvider(),
+        now=replay_adapter.observed_at + timedelta(minutes=5),
+        mode=RunMode.REPLAY,
+    )
+
+    assert outcome.passport.get("status") != "failed_closed"
+    assert outcome.passport["operational_state"]["reconciliation_clean"] is True
+    assert any(
+        event["event"] == "entry_order_terminal_reconciled" and event["status"] == "filled"
+        for event in outcome.passport["operational_state"]["lifecycle_events"]
     )
 
 
@@ -1192,7 +1295,7 @@ async def test_first_competition_cycle_rejects_a_polluted_baseline(
 
 @pytest.mark.asyncio
 async def test_fresh_pending_entry_is_canceled_at_cutoff_without_replacement(
-    settings, repository, replay_adapter
+    settings, repository, replay_adapter, monkeypatch
 ) -> None:
     first = await AgentService(settings, repository).run_cycle(
         adapter=replay_adapter,
@@ -1208,6 +1311,11 @@ async def test_fresh_pending_entry_is_canceled_at_cutoff_without_replacement(
         order.status = "submitted"
         order.submitted_at = NEW_ENTRY_CUTOFF - timedelta(seconds=10)
         order.environment_role = "competition"
+
+    async def pending_order(_broker_order_id: str):
+        return {"status": "submitted"}
+
+    monkeypatch.setattr(replay_adapter, "order_by_id", pending_order)
     request_count = len(replay_adapter.submitted_requests)
 
     outcome = await AgentService(production_settings(settings), repository).run_cycle(
