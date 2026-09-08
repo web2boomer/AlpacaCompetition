@@ -54,7 +54,7 @@ make replay
 make serve
 ```
 
-Open <http://127.0.0.1:8000>. Replay mode requires no API keys and seeds the canonical, explicitly non-official demonstration cycle.
+Open <http://127.0.0.1:3107>. Replay mode requires no API keys and seeds the canonical, explicitly non-official demonstration cycle.
 
 Keep the two account configurations in separate ignored files. Use
 `.env.development.local` with the development role and development credentials; reserve
@@ -80,7 +80,7 @@ Commands report credentials only as present or missing. They never print account
 .venv/bin/money-machine replay
 
 # Start dashboard
-.venv/bin/money-machine serve --host 127.0.0.1 --port 8000
+.venv/bin/money-machine serve --host 127.0.0.1 --port 3107
 
 # Safe Alpaca V2 read verification for the selected role
 .venv/bin/money-machine --env-file .env.competition.local mcp-read-check
@@ -105,7 +105,7 @@ Commands report credentials only as present or missing. They never print account
 
 # Run the real local development instance (dashboard and scheduler use one live audit DB)
 DATABASE_URL=sqlite:///./money_machine.development.db RUN_MODE=live \
-  .venv/bin/money-machine --env-file .env.development.local serve --host 127.0.0.1 --port 8000
+  .venv/bin/money-machine --env-file .env.development.local serve --host 127.0.0.1 --port 3107
 DATABASE_URL=sqlite:///./money_machine.development.db RUN_MODE=live \
   .venv/bin/money-machine --env-file .env.development.local scheduler
 ```

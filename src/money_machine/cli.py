@@ -34,7 +34,7 @@ def main() -> None:
     subparsers.add_parser("replay", help="run the canonical offline decision cycle")
     serve = subparsers.add_parser("serve", help="serve the public dashboard")
     serve.add_argument("--host", default="127.0.0.1")
-    serve.add_argument("--port", default=8000, type=int)
+    serve.add_argument("--port", default=3107, type=int)
     db = subparsers.add_parser("db", help="database migration commands")
     db.add_argument("action", choices=["upgrade", "current"])
     scheduler = subparsers.add_parser("scheduler", help="run the guarded five-minute loop")

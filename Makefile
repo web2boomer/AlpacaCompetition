@@ -23,4 +23,4 @@ replay: migrate
 	.venv/bin/money-machine replay
 
 serve:
-	.venv/bin/money-machine serve --host 127.0.0.1 --port 8000
+	.venv/bin/money-machine serve --host 127.0.0.1 --port 3107
