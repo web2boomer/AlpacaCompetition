@@ -57,6 +57,13 @@ def test_mission_control_report_returns_current_payload(
     metrics = {metric["name"]: metric["value"] for metric in body["metrics"]}
     assert metrics["net_profit"] == "1234.56"
     assert metrics["portfolio_value"] == "101234.56"
+    assert metrics["x_operating_cost_total"] == "0.00"
+    assert body["metadata"]["costs_contract_version"] == "v1"
+    assert [item["cost_key"] for item in body["metadata"]["costs_v1"]] == ["alpaca_paper_trading"]
+    assert {item["cost_key"] for item in body["metadata"]["costs_v1_unknowns"]} == {
+        "openai_api_usage",
+        "alpaca_market_data_subscription",
+    }
     assert "project-token" not in response.text
 
 

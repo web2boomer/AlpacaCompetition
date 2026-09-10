@@ -6,6 +6,9 @@ from pydantic import SecretStr
 
 from money_machine import business_reporting
 from money_machine.business_reporting import (
+    COSTS_CONTRACT_VERSION,
+    OPERATING_COST_GAPS,
+    OPERATING_COSTS,
     PAPER_PNL_EXCEPTION_NOTE,
     PROJECT,
     BusinessReportBuilder,
@@ -87,6 +90,55 @@ def test_builder_maps_persisted_paper_equity_to_real_competition_pnl(
     assert report.metadata["paper_pnl_reported_as_real"] is True
     assert report.metadata["paper_pnl_exception_note"] == PAPER_PNL_EXCEPTION_NOTE
     assert report.metadata["official_scoring_window"] is True
+
+
+def test_builder_emits_costs_v1_without_converting_unknown_costs_to_zero(
+    repository: AuditRepository,
+) -> None:
+    boundary = SCORING_STARTS_AT + timedelta(hours=2)
+    persist_equity(repository, observed_at=boundary, equity=Decimal("101234.56"))
+
+    report = BusinessReportBuilder(repository).build(now=boundary + timedelta(minutes=17))
+
+    assert report is not None
+    metrics = {metric.name: metric for metric in report.metrics}
+    assert metrics["x_operating_cost_total"].value == Decimal("0.00")
+    assert metrics["x_operating_cost_total"].label == "Known operating costs (incomplete)"
+    assert report.metadata is not None
+    assert report.metadata["costs_contract_version"] == COSTS_CONTRACT_VERSION == "v1"
+    assert report.metadata["costs_v1_coverage"] == "known_costs_only"
+    assert report.metadata["costs_v1_render_excluded"] is True
+
+    costs = report.metadata["costs_v1"]
+    assert [item["cost_key"] for item in costs] == ["alpaca_paper_trading"]
+    assert costs == [item.as_payload() for item in OPERATING_COSTS]
+    assert costs[0] == {
+        "cost_key": "alpaca_paper_trading",
+        "display_name": "Alpaca paper trading",
+        "category": "data_vendor",
+        "type": "recurring",
+        "status": "active",
+        "amount_usd_monthly": "0.00",
+        "currency": "USD",
+        "cadence": "monthly",
+        "proration_rule": "exact",
+        "effective_start": "2026-08-28",
+        "effective_end": None,
+        "source_confidence": "list_price",
+        "source_type": "manual",
+        "evidence_ref": "https://docs.alpaca.markets/us/docs/trading-api#paper-trading",
+        "notes": "Paper trading access only; the separate market-data plan remains unknown.",
+    }
+
+    unknowns = report.metadata["costs_v1_unknowns"]
+    assert unknowns == [dict(gap) for gap in OPERATING_COST_GAPS]
+    assert {gap["cost_key"] for gap in unknowns} == {
+        "openai_api_usage",
+        "alpaca_market_data_subscription",
+    }
+    assert all("amount_usd_monthly" not in gap for gap in unknowns)
+    assert all(gap["source_confidence"] is None for gap in unknowns)
+    assert not any(item["cost_key"].startswith("render_") for item in costs)
 
 
 def test_builder_reports_verified_pre_scoring_equity_without_calling_it_official(

@@ -31,6 +31,34 @@ ledger, tax, or cash accounting purpose.
 | `portfolio_value` | `equity_snapshots.portfolio_value` from the same row | Balance | Point-in-time at the report boundary; USD | Alpaca's persisted paper portfolio value is authoritative. |
 | `cash_balance` | `equity_snapshots.cash` from the same row | Balance | Point-in-time at the report boundary; USD | Alpaca's persisted paper cash balance is authoritative. |
 | `return_percent` | `(equity - 100000) / 100000 * 100` | Gauge | Competition-to-date; percent | The fixed verified competition baseline is `$100,000.00`; output is rounded to four decimal places. |
+| `x_operating_cost_total` | Sum of active `metadata.costs_v1` amounts with trustworthy price evidence | Flow | Monthly normalized USD | This is explicitly labelled as an incomplete known-cost total while any audited vendor amount remains unknown. |
+
+## Operating-cost mapping
+
+The producer implements the additive `costs_v1` overlay without changing the legacy metrics above.
+It currently reports one price-backed line item:
+
+| Stable key | Category / type | Amount | Confidence and evidence |
+|---|---|---:|---|
+| `alpaca_paper_trading` | `data_vendor` / `recurring` | `$0.00` monthly | `list_price`; Alpaca's official Trading API documentation states that paper trading is free. This line covers paper-trading access only, not the account's market-data subscription. |
+
+Every cost item includes status, cadence, effective dates, confidence, source type, and a non-secret
+evidence pointer. `metadata.costs_contract_version` is `v1`. The producer also sends
+`costs_v1_coverage=known_costs_only` and a structured `costs_v1_unknowns` list. Unknown entries have
+no amount field, so they cannot be mistaken for free services or included in the reported total.
+
+The current audited gaps are:
+
+- `openai_api_usage`: the application does not persist billable usage, and its project key lacks
+  the `api.usage.read` scope required by the OpenAI Costs API. An invoice, an authorized Costs API
+  feed, or locally persisted billed cost is required before this can become a `costs_v1` item.
+- `alpaca_market_data_subscription`: the paper API host and credentials do not establish whether
+  the account uses the free Basic data plan or the paid Algo Trader Plus plan. Account-plan or
+  invoice evidence is required.
+
+Render compute, worker, and Postgres costs are intentionally absent because Mission Control
+attributes the project's Render infrastructure directly. Repository hosting, DNS, and centralized
+observability have no authoritative project allocation in this repository and are not included.
 
 Pre-scoring reports start after the first completed hourly boundary following the hackathon start
 and use only persisted, completed live observations for the verified competition account. Official
