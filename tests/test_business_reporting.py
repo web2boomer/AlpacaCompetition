@@ -6,9 +6,8 @@ from pydantic import SecretStr
 
 from money_machine import business_reporting
 from money_machine.business_reporting import (
-    COSTS_CONTRACT_VERSION,
     OPERATING_COST_GAPS,
-    OPERATING_COSTS,
+    OPERATING_COST_KNOWN_FACTS,
     PAPER_PNL_EXCEPTION_NOTE,
     PROJECT,
     BusinessReportBuilder,
@@ -92,7 +91,7 @@ def test_builder_maps_persisted_paper_equity_to_real_competition_pnl(
     assert report.metadata["official_scoring_window"] is True
 
 
-def test_builder_emits_costs_v1_without_converting_unknown_costs_to_zero(
+def test_builder_omits_cost_contract_while_active_vendor_amounts_are_unknown(
     repository: AuditRepository,
 ) -> None:
     boundary = SCORING_STARTS_AT + timedelta(hours=2)
@@ -101,36 +100,34 @@ def test_builder_emits_costs_v1_without_converting_unknown_costs_to_zero(
     report = BusinessReportBuilder(repository).build(now=boundary + timedelta(minutes=17))
 
     assert report is not None
-    metrics = {metric.name: metric for metric in report.metrics}
-    assert metrics["x_operating_cost_total"].value == Decimal("0.00")
-    assert metrics["x_operating_cost_total"].label == "Known operating costs (incomplete)"
+    metric_names = {metric.name for metric in report.metrics}
+    assert not any(name.startswith("x_") and "cost" in name for name in metric_names)
     assert report.metadata is not None
-    assert report.metadata["costs_contract_version"] == COSTS_CONTRACT_VERSION == "v1"
-    assert report.metadata["costs_v1_coverage"] == "known_costs_only"
-    assert report.metadata["costs_v1_render_excluded"] is True
+    assert "costs_contract_version" not in report.metadata
+    assert "costs_v1" not in report.metadata
 
-    costs = report.metadata["costs_v1"]
-    assert [item["cost_key"] for item in costs] == ["alpaca_paper_trading"]
-    assert costs == [item.as_payload() for item in OPERATING_COSTS]
-    assert costs[0] == {
-        "cost_key": "alpaca_paper_trading",
-        "display_name": "Alpaca paper trading",
-        "category": "data_vendor",
-        "type": "recurring",
-        "status": "active",
-        "amount_usd_monthly": "0.00",
-        "currency": "USD",
-        "cadence": "monthly",
-        "proration_rule": "exact",
-        "effective_start": "2026-08-28",
-        "effective_end": None,
-        "source_confidence": "list_price",
-        "source_type": "manual",
-        "evidence_ref": "https://docs.alpaca.markets/us/docs/trading-api#paper-trading",
-        "notes": "Paper trading access only; the separate market-data plan remains unknown.",
-    }
+    observability = report.metadata["operating_cost_observability"]
+    assert observability["status"] == "incomplete"
+    assert observability["contract_emitted"] is False
+    assert observability["render_excluded"] is True
+    assert observability["known_facts"] == [dict(item) for item in OPERATING_COST_KNOWN_FACTS]
+    assert observability["known_facts"] == [
+        {
+            "cost_key": "alpaca_paper_trading",
+            "display_name": "Alpaca paper trading",
+            "category": "data_vendor",
+            "type": "recurring",
+            "status": "active",
+            "amount_usd_monthly": "0.00",
+            "currency": "USD",
+            "cadence": "monthly",
+            "source_confidence": "list_price",
+            "evidence_ref": "https://docs.alpaca.markets/us/docs/trading-api#paper-trading",
+            "notes": "Paper trading access only; the separate market-data plan remains unknown.",
+        }
+    ]
 
-    unknowns = report.metadata["costs_v1_unknowns"]
+    unknowns = observability["gaps"]
     assert unknowns == [dict(gap) for gap in OPERATING_COST_GAPS]
     assert {gap["cost_key"] for gap in unknowns} == {
         "openai_api_usage",
@@ -138,7 +135,10 @@ def test_builder_emits_costs_v1_without_converting_unknown_costs_to_zero(
     }
     assert all("amount_usd_monthly" not in gap for gap in unknowns)
     assert all(gap["source_confidence"] is None for gap in unknowns)
-    assert not any(item["cost_key"].startswith("render_") for item in costs)
+    assert not any(
+        item["cost_key"].startswith("render_")
+        for item in (*observability["known_facts"], *unknowns)
+    )
 
 
 def test_builder_reports_verified_pre_scoring_equity_without_calling_it_official(

@@ -57,13 +57,17 @@ def test_mission_control_report_returns_current_payload(
     metrics = {metric["name"]: metric["value"] for metric in body["metrics"]}
     assert metrics["net_profit"] == "1234.56"
     assert metrics["portfolio_value"] == "101234.56"
-    assert metrics["x_operating_cost_total"] == "0.00"
-    assert body["metadata"]["costs_contract_version"] == "v1"
-    assert [item["cost_key"] for item in body["metadata"]["costs_v1"]] == ["alpaca_paper_trading"]
-    assert {item["cost_key"] for item in body["metadata"]["costs_v1_unknowns"]} == {
+    assert not any(name.startswith("x_") and "cost" in name for name in metrics)
+    assert "costs_contract_version" not in body["metadata"]
+    assert "costs_v1" not in body["metadata"]
+    cost_observability = body["metadata"]["operating_cost_observability"]
+    assert cost_observability["contract_emitted"] is False
+    assert cost_observability["render_excluded"] is True
+    assert {item["cost_key"] for item in cost_observability["gaps"]} == {
         "openai_api_usage",
         "alpaca_market_data_subscription",
     }
+    assert all("amount_usd_monthly" not in item for item in cost_observability["gaps"])
     assert "project-token" not in response.text
 
 
