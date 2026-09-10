@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Protocol
+from typing import Any, Protocol
 from urllib.error import HTTPError
 
 import structlog
@@ -27,6 +27,68 @@ PAPER_PNL_EXCEPTION_NOTE = (
 )
 
 logger = structlog.get_logger()
+
+
+# These facts and gaps are observability only. They deliberately do not use the costs_v1 contract
+# keys because Mission Control currently treats any emitted x_operating_cost_total as complete.
+OPERATING_COST_KNOWN_FACTS: tuple[dict[str, Any], ...] = (
+    {
+        "cost_key": "alpaca_paper_trading",
+        "display_name": "Alpaca paper trading",
+        "category": "data_vendor",
+        "type": "recurring",
+        "status": "active",
+        "amount_usd_monthly": "0.00",
+        "currency": "USD",
+        "cadence": "monthly",
+        "source_confidence": "list_price",
+        "evidence_ref": "https://docs.alpaca.markets/us/docs/trading-api#paper-trading",
+        "notes": "Paper trading access only; the separate market-data plan remains unknown.",
+    },
+)
+
+OPERATING_COST_GAPS: tuple[dict[str, Any], ...] = (
+    {
+        "cost_key": "openai_api_usage",
+        "display_name": "OpenAI API",
+        "category": "llm_usage",
+        "type": "usage",
+        "status": "active",
+        "cadence": "variable",
+        "source_confidence": None,
+        "evidence_ref": "openai:organization-costs:api.usage.read-required",
+        "gap_reason": (
+            "The project key cannot read the OpenAI Costs API and billed usage is not persisted "
+            "locally."
+        ),
+    },
+    {
+        "cost_key": "alpaca_market_data_subscription",
+        "display_name": "Alpaca market data",
+        "category": "data_vendor",
+        "type": "recurring",
+        "status": "active",
+        "cadence": "monthly",
+        "source_confidence": None,
+        "evidence_ref": "alpaca:account-market-data-plan:not-persisted",
+        "gap_reason": (
+            "The repository does not establish whether the account uses Basic or Algo Trader "
+            "Plus market data."
+        ),
+    },
+)
+
+
+def _cost_observability_metadata() -> dict[str, Any]:
+    return {
+        "operating_cost_observability": {
+            "status": "incomplete",
+            "contract_emitted": False,
+            "render_excluded": True,
+            "known_facts": [dict(item) for item in OPERATING_COST_KNOWN_FACTS],
+            "gaps": [dict(gap) for gap in OPERATING_COST_GAPS],
+        }
+    }
 
 
 class ReportClient(Protocol):
@@ -175,6 +237,7 @@ class BusinessReportBuilder:
                 "paper_pnl_exception_note": PAPER_PNL_EXCEPTION_NOTE,
                 "official_scoring_window": official_scoring_window,
                 "scoring_window_state": ("scoring" if official_scoring_window else "pre_scoring"),
+                **_cost_observability_metadata(),
             },
         )
 
