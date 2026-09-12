@@ -1,5 +1,8 @@
 # Money Machine
 
+> Project lifecycle: **In Development** (`in_development`). See
+> [Project lifecycle](docs/project-lifecycle.md).
+
 Money Machine is an auditable autonomous options agent for the Alpaca AI Trading Agents Hackathon, Options Alpha Agents track. It observes a paper account and liquid index options through Alpaca MCP Server V2, compiles only defined-risk structures, lets a structured model choose among candidate IDs or abstain, applies deterministic risk policy, reconciles broker state, and publishes a Decision Passport.
 
 The application is built to fail closed. A missing quote, invalid model response, stale chain, account mismatch, live endpoint, unexplained position, kill switch, time cutoff, or risk-cap breach prevents a new entry. Development entry authority is not tied to the competition clock. Competition entries become eligible automatically at the official Monday scoring start after the exact paper account is verified on that live cycle; before the first managed competition order, the account must also still be flat, fill-free, and exactly $100,000.
