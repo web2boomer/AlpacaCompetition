@@ -1,5 +1,21 @@
 # Project mission
 
+# Post-competition status
+
+The official competition equity lock passed at 16:00 ET on 2026-09-03. All final-day and
+final-hour trading authorizations below are expired historical context and must not be used to
+justify any new order, deployment, sizing exception, or account mutation.
+
+Until judging is complete, keep the official competition account flat and do not deploy a trading
+change to it. Post-competition research resumes only after an explicit paper-account reset and
+account-fingerprint verification. Use the development account path for the next experiment: it is
+not bound to the one-off competition dates, while paper-only transport, regular market hours,
+defined-risk structures, reconciliation, idempotency, audit, and emergency exits remain mandatory.
+
+Post-competition work should treat strategies as separate sleeves with frozen prospective rules.
+Do not change entry logic, sizing, cadence, and exits together. Record live results and rejected-trade
+counterfactuals for at least 20 sessions before recommending promotion.
+
 The shared objective of every agent working in this repository is to win the Alpaca AI Trading Agents Hackathon.
 
 Evaluate product, engineering, trading, risk, deployment, and presentation decisions by how much they improve the probability of winning under the official judging criteria. Account equity and P&L matter, so agents must explicitly identify when a conservative choice materially limits competitive upside and propose an evidence-backed alternative.

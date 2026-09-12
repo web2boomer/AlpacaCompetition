@@ -29,7 +29,7 @@ projects:
               - key: MISSION_CONTROL_PROJECT
                 value: alpaca-competition
               - key: MISSION_CONTROL_REPORTING_INTERVAL_MINUTES
-                value: "60"
+                value: "15"
               - key: MISSION_CONTROL_ENVIRONMENT
                 value: production
               # Secret values are managed in the Render dashboard. Omitting them

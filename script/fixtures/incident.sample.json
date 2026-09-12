@@ -1,0 +1,12 @@
+{
+  "_test": { "status": "routed", "repo": "AlpacaCompetition" },
+  "schema_version": 1,
+  "incident": {
+    "source": "betterstack",
+    "event": "started",
+    "incident_id": "fixture-alpaca-1",
+    "incident_name": "alpaca-competition web down",
+    "monitor_name": "alpaca-competition / web",
+    "system": "alpaca-competition"
+  }
+}

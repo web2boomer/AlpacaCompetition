@@ -1,0 +1,125 @@
+# Copy to .github/workflows/incident.yml in a participating product.
+# Hub: web2boomer/project-template. This workflow never deploys or touches production.
+
+name: Incident
+run-name: incident:${{ github.event.client_payload.incident.incident_id || github.event.client_payload.incident_id || inputs.incident_id || 'fixture' }}:${{ github.event.client_payload.incident.event || github.event.client_payload.event || inputs.event || 'pr' }}
+
+on:
+  repository_dispatch:
+    types: [betterstack_incident]
+  workflow_dispatch:
+    inputs:
+      incident_id:
+        description: Incident id
+        required: true
+        type: string
+      event:
+        description: started / reopened
+        required: true
+        type: string
+        default: started
+      incident_name:
+        description: Human title
+        type: string
+      system:
+        description: Mission Control project slug
+        type: string
+      monitor_name:
+        description: Better Stack resource name
+        type: string
+      cause:
+        description: Cause / error
+        type: string
+      incident_url:
+        description: Better Stack URL
+        type: string
+  pull_request:
+    paths:
+      - ".github/workflows/incident.yml"
+      - "script/incident_handle.rb"
+      - "script/fixtures/incident.sample.json"
+
+concurrency:
+  group: incident-${{ github.event.client_payload.incident.incident_id || github.event.client_payload.incident_id || inputs.incident_id || github.run_id }}-${{ github.event.client_payload.incident.event || github.event.client_payload.event || inputs.event || 'pr' }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  fixture:
+    name: Handle sample fixture
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Write and verify fixture report
+        run: |
+          set -euo pipefail
+          ruby script/incident_handle.rb --fixture script/fixtures/incident.sample.json --out-dir tmp
+          test -s tmp/incident-report.md
+          test -s tmp/incident-report.json
+
+  handle:
+    name: Write incident report
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Write incoming payload
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CLIENT_PAYLOAD: ${{ toJSON(github.event.client_payload) }}
+          INPUTS: ${{ toJSON(inputs) }}
+        run: |
+          set -euo pipefail
+          mkdir -p tmp
+          ruby -rjson -e '
+            raw = ENV.fetch("EVENT_NAME") == "repository_dispatch" ? ENV.fetch("CLIENT_PAYLOAD") : ENV.fetch("INPUTS")
+            payload = JSON.parse(raw)
+            abort "incoming payload is not an object" unless payload.is_a?(Hash)
+            File.write("tmp/incoming.json", JSON.pretty_generate(payload))
+          '
+
+      - name: Check for an earlier successful run
+        id: dedupe
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_TITLE: incident:${{ github.event.client_payload.incident.incident_id || github.event.client_payload.incident_id || inputs.incident_id || 'fixture' }}:${{ github.event.client_payload.incident.event || github.event.client_payload.event || inputs.event || 'pr' }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/incident.yml/runs?event=${GITHUB_EVENT_NAME}&per_page=100" > tmp/prior-runs.json
+          duplicate=$(ruby -rjson -e '
+            runs = JSON.parse(File.read("tmp/prior-runs.json")).fetch("workflow_runs", [])
+            found = runs.any? do |run|
+              run.fetch("id").to_s != ENV.fetch("GITHUB_RUN_ID") &&
+                run["display_title"] == ENV.fetch("RUN_TITLE") &&
+                run["conclusion"] == "success"
+            end
+            print(found)
+          ')
+          echo "duplicate=${duplicate}" >> "$GITHUB_OUTPUT"
+
+      - name: Record duplicate in summary
+        if: steps.dedupe.outputs.duplicate == 'true'
+        run: echo "Duplicate idempotency key; an earlier successful report already exists." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Write report
+        if: steps.dedupe.outputs.duplicate != 'true'
+        run: ruby script/incident_handle.rb --payload tmp/incoming.json --out-dir tmp
+
+      - name: Upload report
+        if: steps.dedupe.outputs.duplicate != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: incident-report-${{ github.run_id }}
+          path: |
+            tmp/incident-report.md
+            tmp/incident-report.json
+          if-no-files-found: error
+          retention-days: 30
