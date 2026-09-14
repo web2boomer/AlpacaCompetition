@@ -1,5 +1,21 @@
 # Project mission
 
+## Fresh-main discipline
+
+Apply this before repository inspection or implementation in every task, including delegated work:
+
+1. Run `git fetch origin main`, then create the task branch from `origin/main`.
+   Never start from another feature branch unless the user explicitly requests that dependency.
+2. Refresh `origin/main` before the first commit and again immediately before pushing or
+   opening/updating a pull request. If `origin/main` is not an ancestor of the task branch,
+   merge or rebase it, resolve conflicts, and rerun the relevant checks.
+3. After a substantial investigation, test run, or wait, refresh before resuming implementation.
+4. If unrelated local work blocks the update, preserve it in a named stash or separate worktree.
+   Do not ship a stale branch to avoid a merge. Restore the preserved work afterward, or report
+   exactly what remains preserved and where.
+5. Before calling a pull request ready, fetch once more, verify that the branch contains current
+   `origin/main`, and state the verified base and head revisions in the handoff.
+
 The shared objective of every agent working in this repository is to win the Alpaca AI Trading Agents Hackathon.
 
 Evaluate product, engineering, trading, risk, deployment, and presentation decisions by how much they improve the probability of winning under the official judging criteria. Account equity and P&L matter, so agents must explicitly identify when a conservative choice materially limits competitive upside and propose an evidence-backed alternative.
