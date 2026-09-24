@@ -81,3 +81,8 @@ Use a short, direct, action-oriented voice in chat, tickets, issue updates, PR d
 ## Local development environment
 
 When this project uses a database, first check its existing local instance and repository-specific setup. Local credentials are usually in gitignored config files, not the agent shell. Confirm file names from this repo's documentation without printing contents or secret values. Use the application's normal local command and never switch to production because a local or sandboxed connection failed. Mission Control documents machine-wide setup and safe diagnostics in `../MissionControl/docs/local-development-environments.md` and `../MissionControl/docs/local-mysql.md`.
+
+## Render and PR defaults
+
+- Use **AOB Workspace** for Render work. Do not ask which Render workspace to use each time. Verify the service before changing it; workspace selection alone does not authorize a production change.
+- Push completed task branches and open or update their PRs without asking for push permission. When the work, required checks, and review evidence are ready for Alex, mark the PR **Ready for review**. Do not leave a ready PR in draft. Follow the repository's approval rules; do not self-approve or merge.
