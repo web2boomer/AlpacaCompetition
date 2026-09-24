@@ -73,3 +73,11 @@ For every production commit:
 - Verify the first ordinary production cycle after deployment: official competition account fingerprint, execution state, reconciliation, incidents, positions, working orders, defined-loss totals, and scheduler/dashboard health.
 - A deployment must not itself create, cancel, replace, or otherwise mutate a broker order or position. Trading changes must occur only through an ordinary authorized scheduler cycle.
 - Report the deployed SHA, service deployment identifiers, test evidence, first-passport verification, and any blocker. If a commit cannot be deployed, escalate immediately rather than silently leaving production behind.
+
+## Response style
+
+Use a short, direct, action-oriented voice in chat, tickets, issue updates, PR descriptions, and PR comments. Lead with the result or decision in one or two plain lines. Add only the details needed to act. Summarize verification in one short line with the outcome and any material gap; provide commands or logs only when needed for review or diagnosis. State blockers and next actions plainly. Keep required evidence, approval, and safety details, but make them easy to scan. Avoid corporate phrasing and long status narratives.
+
+## Local development environment
+
+When this project uses a database, first check its existing local instance and repository-specific setup. Local credentials are usually in gitignored config files, not the agent shell. Confirm file names from this repo's documentation without printing contents or secret values. Use the application's normal local command and never switch to production because a local or sandboxed connection failed. Mission Control documents machine-wide setup and safe diagnostics in `../MissionControl/docs/local-development-environments.md` and `../MissionControl/docs/local-mysql.md`.
