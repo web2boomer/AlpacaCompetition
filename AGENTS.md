@@ -2,12 +2,12 @@
 
 ## Standing PR merge delegation (1 October 2026)
 
-Alex authorizes agents to merge ready PRs for this active Mission Control project,
+Alex authorizes agents to merge ready PRs for Alpaca Competition,
 including development changes, fixes, maintenance, and validated generated fixes.
 Do not wait for a separate owner merge action. Keep each change on a reviewable PR;
 never push directly to the default branch or self-approve. Before each merge,
 confirm the PR is out of draft, its exact head and intended base are current,
-required CI and independent or specialist reviews pass, no blocking discussion
+required CI and all applicable independent and specialist reviews pass, no blocking discussion
 or conflict remains, and all prerequisite PRs are merged. Merge one PR at a time
 in dependency order, then unblock value, then oldest ready first. Refresh the
 base, cumulative diff, checks, and exact-revision reviews after each predecessor.
