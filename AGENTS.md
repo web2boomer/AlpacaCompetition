@@ -1,5 +1,24 @@
 # Project mission
 
+## Standing PR merge delegation (1 October 2026)
+
+Alex authorizes agents to merge ready PRs for this active Mission Control project,
+including development changes, fixes, maintenance, and validated generated fixes.
+Do not wait for a separate owner merge action. Keep each change on a reviewable PR;
+never push directly to the default branch or self-approve. Before each merge,
+confirm the PR is out of draft, its exact head and intended base are current,
+required CI and independent or specialist reviews pass, no blocking discussion
+or conflict remains, and all prerequisite PRs are merged. Merge one PR at a time
+in dependency order, then unblock value, then oldest ready first. Refresh the
+base, cumulative diff, checks, and exact-revision reviews after each predecessor.
+If any gate is stale or ambiguous, leave the PR open and record the blocker.
+Preserve product-specific launch, trading, legal, and deployment controls; merging
+an implementation does not by itself open a product or close those gates. The
+current GitHub plan does not expose native auto-merge on private repositories;
+use an agent-executed GitHub merge after the final recheck where applicable.
+This owner delegation supersedes older owner-merge-only wording in this file and
+managed shared copies until their pending policy update is adopted.
+
 ## Fresh-main discipline
 
 Apply this before repository inspection or implementation in every task, including delegated work:
@@ -85,4 +104,4 @@ When this project uses a database, first check its existing local instance and r
 ## Render and PR defaults
 
 - Use **AOB Workspace** for Render work. Do not ask which Render workspace to use each time. Verify the service before changing it; workspace selection alone does not authorize a production change.
-- Push completed task branches and open or update their PRs without asking for push permission. When the work, required checks, and review evidence are ready for Alex, mark the PR **Ready for review**. Do not leave a ready PR in draft. Follow the repository's approval rules; do not self-approve or merge.
+- Push completed task branches and open or update their PRs without asking for push permission. When the work, required checks, and independent review are complete, mark the PR **Ready for review**. Do not leave a ready PR in draft. Merge in dependency order after the final gate recheck; do not self-approve.
