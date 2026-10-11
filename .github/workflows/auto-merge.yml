@@ -1,0 +1,1018 @@
+name: Queue coordinator-approved pull requests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+      - converted_to_draft
+      - edited
+      - labeled
+      - unlabeled
+      - closed
+  issue_comment:
+    types:
+      - created
+      - edited
+  status:
+  check_run:
+    types:
+      - completed
+  workflow_run:
+    workflows:
+      - Codex independent review
+      - Review event relay
+    types:
+      - completed
+
+permissions: {}
+
+concurrency:
+  group: auto-merge-coordinator
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  invalidate:
+    name: Invalidate queued merge before reconciliation
+    if: ${{ vars.COORDINATOR_BOOTSTRAP_ACTIVE == 'true' && (github.event_name == 'pull_request_target' || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Review event relay')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: write
+      statuses: write
+    steps:
+      - name: Cancel any queued merge and require revalidation
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            let relayPullRequests = null;
+            if (context.eventName === 'workflow_run') {
+              const trustedWorkflow = await github.rest.actions.getWorkflow({
+                owner, repo, workflow_id: 'review-event-relay.yml',
+              });
+              if (context.payload.workflow_run.workflow_id !== trustedWorkflow.data.id) {
+                core.info('Ignoring a different workflow with the relay display name.');
+                return;
+              }
+              const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+                owner, repo, run_id: context.payload.workflow_run.id, per_page: 100,
+              });
+              if (!jobs.some((job) =>
+                job.name === 'Notify trusted coordinator' && job.conclusion === 'success')) {
+                core.info('Review relay did not notify for an eligible PR.');
+                return;
+              }
+              relayPullRequests = [];
+              for (const linked of context.payload.workflow_run.pull_requests || []) {
+                const response = await github.rest.pulls.get({
+                  owner, repo, pull_number: linked.number,
+                });
+                if (response.data.state === 'open' && response.data.base.ref === 'main' &&
+                    response.data.head.repo?.full_name?.toLowerCase() === (owner + '/' + repo).toLowerCase()) {
+                  relayPullRequests.push(response.data);
+                }
+              }
+              if (relayPullRequests.length === 0) {
+                core.info('Review relay has no verified same-repository main PR.');
+                return;
+              }
+            }
+            const eventPR = context.payload.pull_request;
+            const targets = eventPR ? [eventPR] : relayPullRequests || await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', per_page: 100,
+            });
+            const query = `
+              query($id: ID!) {
+                node(id: $id) {
+                  ... on PullRequest { autoMergeRequest { enabledAt } }
+                }
+              }
+            `;
+            for (const pr of targets) {
+              if (pr.state !== 'open' || pr.base.ref !== 'main' ||
+                  pr.head.repo?.full_name?.toLowerCase() !== (owner + '/' + repo).toLowerCase()) continue;
+              await github.rest.repos.createCommitStatus({
+                owner, repo, sha: pr.head.sha,
+                state: 'pending',
+                context: 'Automerge coordinator gate',
+                description: 'Rechecking admission, exact revision, and release gates',
+                target_url: `${context.serverUrl}/${owner}/${repo}/pull/${pr.number}`,
+              });
+              const state = await github.graphql(query, { id: pr.node_id });
+              if (state.node?.autoMergeRequest) {
+                await github.graphql(
+                  `mutation($id: ID!) {
+                    disablePullRequestAutoMerge(input: { pullRequestId: $id }) {
+                      pullRequest { number }
+                    }
+                  }`,
+                  { id: pr.node_id },
+                );
+              }
+            }
+
+  reconcile:
+    name: Reconcile all pull requests and serialize auto-merge
+    needs: invalidate
+    if: ${{ always() && vars.COORDINATOR_BOOTSTRAP_ACTIVE == 'true' && (needs.invalidate.result == 'success' || needs.invalidate.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    environment: automerge
+    permissions:
+      contents: write # Required by GitHub's native auto-merge GraphQL mutations
+      checks: read
+      issues: write
+      pull-requests: write
+      statuses: write
+    steps:
+      - name: Reconcile current admission, review, ordering, and live merge requests
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          AUTO_MERGE_ENABLED: ${{ vars.COORDINATOR_AUTO_MERGE }}
+          BRANCH_PROTECTION_VERIFIED: ${{ vars.COORDINATOR_PROTECTION_VERIFIED }}
+          REQUIRED_CI_CHECKS: ${{ vars.COORDINATOR_REQUIRED_CI }}
+          MERGE_TOKEN_CONFIGURED: ${{ secrets.AUTOMERGE_TOKEN != '' }}
+          MERGE_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            if (context.eventName === "status" && context.payload.context !== "Codex review gate") {
+              core.info("Ignoring unrelated commit status event.");
+              return;
+            }
+
+            const autoMergeEnabled =
+              process.env.AUTO_MERGE_ENABLED?.toLowerCase() === "true" &&
+              process.env.BRANCH_PROTECTION_VERIFIED?.toLowerCase() === "true" &&
+              process.env.MERGE_TOKEN_CONFIGURED?.toLowerCase() === "true";
+            let requiredCiChecks = [];
+            try {
+              const parsed = JSON.parse(process.env.REQUIRED_CI_CHECKS || "[]");
+              if (Array.isArray(parsed) && parsed.length > 0 &&
+                  parsed.every((name) => typeof name === "string" && name.length > 0)) {
+                requiredCiChecks = parsed;
+              }
+            } catch {}
+            if (context.eventName === "check_run" &&
+                !requiredCiChecks.includes(context.payload.check_run?.name)) {
+              core.info("Ignoring an unrelated completed check run.");
+              return;
+            }
+            async function removeLabelIfPresent(args) {
+              try {
+                await github.rest.issues.removeLabel(args);
+              } catch (error) {
+                // An earlier queued event may have removed the same label already.
+                // Absence is the desired fail-closed state; other errors still fail.
+                if (error.status !== 404) throw error;
+              }
+            }
+            async function requiredCiPassed(pr) {
+              if (requiredCiChecks.length === 0 || !pr.merge_commit_sha) return false;
+              const mergeCommit = await github.rest.git.getCommit({
+                owner, repo, commit_sha: pr.merge_commit_sha,
+              });
+              if (mergeCommit.data.parents?.[0]?.sha !== pr.base.sha ||
+                  mergeCommit.data.parents?.[1]?.sha !== pr.head.sha) return false;
+              const runs = await github.paginate(github.rest.checks.listForRef, {
+                owner, repo, ref: pr.head.sha, filter: "latest", per_page: 100,
+              });
+              const latestByName = new Map();
+              for (const run of runs.filter((item) =>
+                item.pull_requests?.some((linked) =>
+                  linked.number === pr.number && linked.head?.sha === pr.head.sha &&
+                  linked.base?.sha === pr.base.sha)).sort((a, b) =>
+                Date.parse(b.started_at || b.created_at) - Date.parse(a.started_at || a.created_at) || b.id - a.id)) {
+                if (!latestByName.has(run.name)) latestByName.set(run.name, run);
+              }
+              return requiredCiChecks.every((name) => latestByName.get(name)?.conclusion === "success");
+            }
+            async function enableAutoMergeWithIndependentToken(query, variables) {
+              if (!autoMergeEnabled || !process.env.MERGE_TOKEN) {
+                throw new Error('Independent merge credential is unavailable');
+              }
+              const response = await fetch(process.env.GITHUB_API_URL.replace(/\/$/, '') + '/graphql', {
+                method: 'POST',
+                headers: {
+                  Authorization: 'Bearer ' + process.env.MERGE_TOKEN,
+                  Accept: 'application/vnd.github+json',
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ query, variables }),
+              });
+              const result = await response.json();
+              if (!response.ok || result.errors?.length) {
+                throw new Error('Independent merge token could not enable auto-merge');
+              }
+              return result.data;
+            }
+            async function requestAgentAdmission(pr, expectedHeadSha, expectedBaseSha, expectedBodyHash) {
+              const response = await fetch(
+                process.env.GITHUB_API_URL.replace(/\/$/, '') +
+                  '/repos/' + owner + '/' + repo + '/issues/' + pr.number + '/labels',
+                {
+                  method: 'POST',
+                  headers: {
+                    Authorization: 'Bearer ' + process.env.MERGE_TOKEN,
+                    Accept: 'application/vnd.github+json',
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({ labels: [readyLabel] }),
+                },
+              );
+              if (!response.ok) throw new Error('Agent admission label could not be added');
+              // A withdrawal can race the read above and the label write. Recheck
+              // the live marker and its latest event before considering submission done.
+              const latest = (await github.rest.pulls.get({ owner, repo, pull_number: pr.number })).data;
+              const timeline = await github.paginate(github.rest.issues.listEventsForTimeline, {
+                owner, repo, issue_number: pr.number, per_page: 100,
+              });
+              const agentEvent = timeline.filter((item) =>
+                ["labeled", "unlabeled"].includes(item.event) &&
+                item.label?.name?.toLowerCase() === agentLabel,
+              ).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id).at(-1);
+              if (latest.state !== "open" || latest.draft || latest.head.sha !== expectedHeadSha ||
+                  latest.base.sha !== expectedBaseSha ||
+                  agentSubmissionBodyHash(latest) !== expectedBodyHash ||
+                  !latest.labels.some((label) => label.name.toLowerCase() === agentLabel) ||
+                  agentEvent?.event !== "labeled" ||
+                  agentEvent.actor?.login?.toLowerCase() !== owner.toLowerCase()) {
+                await removeLabelIfPresent({
+                  owner, repo, issue_number: pr.number, name: readyLabel,
+                });
+                return false;
+              }
+              return true;
+            }
+            function expectedReviewSignature(pr) {
+              if (!process.env.MERGE_TOKEN) return null;
+              const evidence = ["v1", (owner + "/" + repo).toLowerCase(), String(pr.number),
+                pr.head.sha, pr.base.sha, "success", "pass"].join("\n");
+              return require("node:crypto").createHmac("sha256", process.env.MERGE_TOKEN)
+                .update(evidence).digest("hex");
+            }
+            function expectedAdmissionSignature(pr, labelEvent, admittedBase = pr.base.sha) {
+              if (!process.env.MERGE_TOKEN || !labelEvent?.id) return null;
+              const evidence = ["admission-v1", (owner + "/" + repo).toLowerCase(),
+                String(pr.number), pr.head.sha, admittedBase, agentSubmissionBodyHash(pr),
+                String(labelEvent.id)].join("\n");
+              return require("node:crypto").createHmac("sha256", process.env.MERGE_TOKEN)
+                .update(evidence).digest("hex");
+            }
+            function agentSubmissionBodyHash(pr) {
+              return require("node:crypto").createHash("sha256").update(pr.body || "").digest("hex");
+            }
+            function expectedAgentSubmissionSignature(pr, labelEvent) {
+              if (!process.env.MERGE_TOKEN || !labelEvent?.id) return null;
+              const evidence = ["agent-v1", (owner + "/" + repo).toLowerCase(), String(pr.number),
+                pr.head.sha, pr.base.ref, agentSubmissionBodyHash(pr), String(labelEvent.id)].join("\n");
+              return require("node:crypto").createHmac("sha256", process.env.MERGE_TOKEN)
+                .update(evidence).digest("hex");
+            }
+            function agentSubmissionRecordMatches(pr, labelEvent, comment) {
+              const marker = comment?.body?.match(
+                /<!-- automerge-agent-submission head=([^\s]+) base_ref=([^\s]+) body=([0-9a-f]{64}) event=([0-9]+) sig=([0-9a-f]{64}) -->/,
+              );
+              return marker?.[1] === pr.head.sha && marker?.[2] === pr.base.ref &&
+                marker?.[3] === agentSubmissionBodyHash(pr) &&
+                marker?.[4] === String(labelEvent?.id) &&
+                marker?.[5] === expectedAgentSubmissionSignature(pr, labelEvent);
+            }
+            function admissionRecordMatches(pr, labelEvent, comment) {
+              const marker = comment?.body?.match(
+                /<!-- automerge-admission head=([^\s]+) base=([^\s]+) body=([0-9a-f]{64}) event=([0-9]+) sig=([0-9a-f]{64}) -->/,
+              );
+              return marker?.[1] === pr.head.sha &&
+                marker?.[3] === agentSubmissionBodyHash(pr) &&
+                marker?.[4] === String(labelEvent?.id) &&
+                marker?.[5] === expectedAdmissionSignature(pr, labelEvent, marker[2]);
+            }
+            const readyLabel = "automerge:ready";
+            const normalizedReadyLabel = readyLabel.toLowerCase();
+            const agentLabel = "automerge:agent";
+            const gateLabels = new Set([
+              "automerge:hold",
+              "legal-gate",
+              "tax-gate",
+              "payment-gate",
+              "trading-gate",
+              "launch-gate",
+              "release-gate",
+              "production-gate",
+              "security-gate",
+              "privacy-gate",
+              "product-gate",
+            ]);
+            const eventPR = context.payload.pull_request;
+            const invalidatingActions = new Set(["synchronize", "converted_to_draft", "reopened"]);
+            const admissionDetailsWereEdited =
+              context.eventName === "pull_request_target" &&
+              context.payload.action === "edited" &&
+              (context.payload.changes?.base?.ref != null || context.payload.changes?.body != null);
+            const admissionWasAddedByOwner =
+              context.eventName === "pull_request_target" &&
+              context.payload.action === "labeled" &&
+              context.payload.label?.name?.toLowerCase() === normalizedReadyLabel &&
+              context.payload.sender?.login?.toLowerCase() === owner.toLowerCase();
+            const agentWasAddedByOwner =
+              context.eventName === "pull_request_target" &&
+              context.payload.action === "labeled" &&
+              context.payload.label?.name?.toLowerCase() === agentLabel &&
+              context.payload.sender?.login?.toLowerCase() === owner.toLowerCase();
+
+            if (agentWasAddedByOwner && eventPR) {
+              const live = (await github.rest.pulls.get({
+                owner, repo, pull_number: eventPR.number,
+              })).data;
+              if (live.state === "open" && !live.draft &&
+                  live.head.sha === eventPR.head.sha &&
+                  live.base.ref === eventPR.base.ref &&
+                  agentSubmissionBodyHash(live) === agentSubmissionBodyHash(eventPR) &&
+                  live.labels.some((label) => label.name.toLowerCase() === agentLabel)) {
+                const timeline = await github.paginate(github.rest.issues.listEventsForTimeline, {
+                  owner, repo, issue_number: eventPR.number, per_page: 100,
+                });
+                const labelEvent = timeline.filter((item) =>
+                  item.event === "labeled" && item.label?.name?.toLowerCase() === agentLabel,
+                ).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id).at(-1);
+                if (labelEvent?.actor?.login?.toLowerCase() === owner.toLowerCase()) {
+                  await github.rest.issues.createComment({
+                    owner, repo, issue_number: eventPR.number,
+                    body:
+                      "<!-- automerge-agent-submission head=" + live.head.sha +
+                      " base_ref=" + live.base.ref + " body=" + agentSubmissionBodyHash(live) +
+                      " event=" + labelEvent.id +
+                      " sig=" + expectedAgentSubmissionSignature(live, labelEvent) + " -->\n" +
+                      "Agent submitted this exact pull request head and description.",
+                  });
+                }
+              }
+            }
+
+            if (admissionWasAddedByOwner && eventPR) {
+              const live = await github.rest.pulls.get({
+                owner, repo, pull_number: eventPR.number,
+              });
+              const eventStillMatches =
+                live.data.state === "open" &&
+                !live.data.draft &&
+                live.data.head.sha === eventPR.head.sha &&
+                live.data.base.sha === eventPR.base.sha &&
+                agentSubmissionBodyHash(live.data) === agentSubmissionBodyHash(eventPR) &&
+                live.data.labels.some((label) => label.name.toLowerCase() === normalizedReadyLabel);
+              if (eventStillMatches) {
+                const timeline = await github.paginate(github.rest.issues.listEventsForTimeline, {
+                  owner, repo, issue_number: eventPR.number, per_page: 100,
+                });
+                const labelEvent = timeline.filter((item) =>
+                  item.event === "labeled" &&
+                  item.label?.name?.toLowerCase() === normalizedReadyLabel,
+                ).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id).at(-1);
+                if (labelEvent?.actor?.login?.toLowerCase() === owner.toLowerCase()) {
+                  await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: eventPR.number,
+                  body:
+                    "<!-- automerge-admission head=" + eventPR.head.sha +
+                    " base=" + eventPR.base.sha + " body=" + agentSubmissionBodyHash(eventPR) +
+                    " event=" + labelEvent.id +
+                    " sig=" + expectedAdmissionSignature(eventPR, labelEvent) + " -->\n" +
+                    "Owner admission recorded for this exact pull request head and base.",
+                  });
+                }
+              }
+            }
+
+            const changedLabel = context.payload.label?.name?.toLowerCase() || "";
+            const changedOwnerOrGateLabel = changedLabel.startsWith("owner:") || gateLabels.has(changedLabel);
+            const agentWasWithdrawn = changedLabel === agentLabel &&
+              context.payload.action === "unlabeled";
+            const changedAdmissionLabel =
+              (changedLabel === normalizedReadyLabel &&
+                (context.payload.action === "unlabeled" || !admissionWasAddedByOwner));
+            const withdrawalLivePR = agentWasWithdrawn && eventPR
+              ? (await github.rest.pulls.get({ owner, repo, pull_number: eventPR.number })).data
+              : null;
+            const admissionWasInvalidated =
+              eventPR &&
+              (
+                (context.eventName === "pull_request_target" &&
+                  (invalidatingActions.has(context.payload.action) || admissionDetailsWereEdited ||
+                   ((context.payload.action === "labeled" || context.payload.action === "unlabeled") &&
+                    (changedAdmissionLabel || changedOwnerOrGateLabel || agentWasWithdrawn))))
+              ) &&
+              (eventPR.labels?.some((label) => label.name.toLowerCase() === normalizedReadyLabel) ||
+               withdrawalLivePR?.labels?.some((label) => label.name.toLowerCase() === normalizedReadyLabel));
+            if (admissionWasInvalidated) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: eventPR.number,
+                body:
+                  "<!-- automerge-invalidation action=" + context.payload.action +
+                  " head=" + eventPR.head.sha + " base=" + eventPR.base.sha + " -->\n" +
+                  "Owner admission was invalidated; re-admit after reviewing the current revision.",
+              });
+              await removeLabelIfPresent({
+                owner, repo, issue_number: eventPR.number, name: readyLabel,
+              });
+            }
+            const agentSubmissionInvalidated =
+              eventPR &&
+              context.eventName === "pull_request_target" &&
+              (invalidatingActions.has(context.payload.action) || admissionDetailsWereEdited ||
+                ((context.payload.action === "labeled" || context.payload.action === "unlabeled") &&
+                  (changedOwnerOrGateLabel ||
+                   (changedLabel === normalizedReadyLabel && context.payload.action === "unlabeled")))) &&
+              eventPR.labels?.some((label) => label.name.toLowerCase() === agentLabel);
+            if (agentSubmissionInvalidated) {
+              await removeLabelIfPresent({
+                owner, repo, issue_number: eventPR.number, name: agentLabel,
+              });
+            }
+
+            const openPullRequests = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: "open",
+              per_page: 100,
+            });
+            const mainRef = await github.rest.git.getRef({ owner, repo, ref: "heads/main" });
+            const mainSha = mainRef.data.object.sha;
+            const autoMergeQuery = `
+              query($id: ID!) {
+                node(id: $id) {
+                  ... on PullRequest {
+                    autoMergeRequest { enabledAt }
+                  }
+                }
+              }
+            `;
+            const reviewThreadsQuery = `
+              query($id: ID!, $after: String) {
+                node(id: $id) {
+                  ... on PullRequest {
+                    reviewThreads(first: 100, after: $after) {
+                      nodes { isResolved }
+                      pageInfo { hasNextPage endCursor }
+                    }
+                  }
+                }
+              }
+            `;
+
+            async function hasUnresolvedReviewThreads(nodeId) {
+              let after = null;
+              do {
+                const result = await github.graphql(reviewThreadsQuery, { id: nodeId, after });
+                const page = result.node?.reviewThreads;
+                if (!page) return true;
+                if (page.nodes.some((thread) => !thread.isResolved)) return true;
+                if (!page.pageInfo.hasNextPage) return false;
+                after = page.pageInfo.endCursor;
+              } while (after);
+              return true;
+            }
+
+            function hasOutstandingChangesRequested(reviews) {
+              const outstanding = new Set();
+              for (const review of [...reviews].sort((a, b) => a.id - b.id)) {
+                const login = review.user?.login?.toLowerCase();
+                if (!login) continue;
+                if (review.state === "CHANGES_REQUESTED") outstanding.add(login);
+                if (review.state === "APPROVED" || review.state === "DISMISSED") outstanding.delete(login);
+              }
+              return outstanding.size > 0;
+            }
+
+            function parseDependencies(body) {
+              const section = body?.match(/^## Merge dependencies[ \t]*\r?\n([\s\S]*?)(?=^## |(?![\s\S]))/im);
+              if (!section) return { valid: false, dependencies: [] };
+              const value = section[1].trim();
+              if (/^none$/i.test(value)) return { valid: true, dependencies: [] };
+              const dependencies = [];
+              for (const line of value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)) {
+                const match = line.match(/^(?:[-*]\s+)?#(?<number>\d+)(?:\s+.*)?$/);
+                if (!match) {
+                  return { valid: false, dependencies: [] };
+                }
+                dependencies.push({
+                  owner,
+                  repo,
+                  number: Number(match.groups.number),
+                });
+              }
+              return { valid: dependencies.length > 0, dependencies };
+            }
+
+            async function dependenciesAreMerged(pullRequest) {
+              const declaration = parseDependencies(pullRequest.body);
+              if (!declaration.valid) return false;
+              for (const dependency of declaration.dependencies) {
+                if (dependency.owner.toLowerCase() === owner.toLowerCase() &&
+                    dependency.repo.toLowerCase() === repo.toLowerCase() &&
+                    dependency.number === pullRequest.number) return false;
+                try {
+                  const response = await github.rest.pulls.get({
+                    owner: dependency.owner,
+                    repo: dependency.repo,
+                    pull_number: dependency.number,
+                  });
+                  if (!response.data.merged_at) return false;
+                } catch {
+                  return false;
+                }
+              }
+              return true;
+            }
+
+            async function setCoordinatorStatus(pr, state, description) {
+              const statuses = await github.paginate(github.rest.repos.listCommitStatusesForRef, {
+                owner,
+                repo,
+                ref: pr.head.sha,
+                per_page: 100,
+              });
+              const existing = statuses.find((status) => status.context === "Automerge coordinator gate");
+              if (existing?.state === state && existing?.description === description) return;
+              await github.rest.repos.createCommitStatus({
+                owner,
+                repo,
+                sha: pr.head.sha,
+                state,
+                context: "Automerge coordinator gate",
+                description,
+                target_url: context.serverUrl + "/" + owner + "/" + repo + "/pull/" + pr.number,
+              });
+            }
+
+            const records = [];
+            for (const listed of openPullRequests) {
+              const response = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: listed.number,
+              });
+              const pr = response.data;
+              const labels = pr.labels.map((label) => label.name.toLowerCase());
+              const hasSubmission = labels.includes(normalizedReadyLabel) || labels.includes(agentLabel);
+              let ownerAddedAdmission = false;
+              let admissionMatchesRevision = false;
+              let exactCodexRecord = false;
+              let agentSubmitted = false;
+
+              const comments = hasSubmission
+                ? await github.paginate(github.rest.issues.listComments, {
+                    owner, repo, issue_number: pr.number, per_page: 100,
+                  })
+                : [];
+
+              if (labels.includes(normalizedReadyLabel)) {
+                const timeline = await github.paginate(github.rest.issues.listEventsForTimeline, {
+                  owner,
+                  repo,
+                  issue_number: pr.number,
+                  per_page: 100,
+                });
+                const labelEvents = timeline
+                  .filter((item) =>
+                    ["labeled", "unlabeled"].includes(item.event) &&
+                    item.label?.name?.toLowerCase() === normalizedReadyLabel,
+                  )
+                  .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id);
+                const latestAdmission = labelEvents.at(-1);
+                ownerAddedAdmission =
+                  latestAdmission?.event === "labeled" &&
+                  latestAdmission.actor?.login?.toLowerCase() === owner.toLowerCase();
+                const admissionRecords = comments
+                  .filter((comment) =>
+                    comment.user?.login === "github-actions[bot]" &&
+                    /<!-- automerge-(admission|invalidation) /.test(comment.body || ""),
+                  )
+                  .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id);
+                const latestAdmissionRecord = admissionRecords.at(-1);
+                admissionMatchesRevision = admissionRecordMatches(pr, latestAdmission, latestAdmissionRecord);
+                if (!ownerAddedAdmission || (latestAdmissionRecord && !admissionMatchesRevision)) {
+                  await removeLabelIfPresent({
+                    owner,
+                    repo,
+                    issue_number: pr.number,
+                    name: readyLabel,
+                  });
+                  labels.splice(labels.indexOf(normalizedReadyLabel), 1);
+                  core.warning("Removed " + readyLabel + " from #" + pr.number + " because its latest addition was not by the repository owner.");
+                }
+              }
+
+              if (labels.includes(agentLabel)) {
+                const timeline = await github.paginate(github.rest.issues.listEventsForTimeline, {
+                  owner, repo, issue_number: pr.number, per_page: 100,
+                });
+                const latestAgentEvent = timeline
+                  .filter((item) => ["labeled", "unlabeled"].includes(item.event) &&
+                    item.label?.name?.toLowerCase() === agentLabel)
+                  .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id)
+                  .at(-1);
+                const latestAgentRecord = comments
+                  .filter((comment) => comment.user?.login === "github-actions[bot]" &&
+                    /<!-- automerge-agent-submission /.test(comment.body || ""))
+                  .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id)
+                  .at(-1);
+                agentSubmitted = latestAgentEvent?.event === "labeled" &&
+                  latestAgentEvent.actor?.login?.toLowerCase() === owner.toLowerCase() &&
+                  agentSubmissionRecordMatches(pr, latestAgentEvent, latestAgentRecord);
+              }
+              const reviewRecords = comments
+                .filter((comment) =>
+                  comment.user?.login === "github-actions[bot]" &&
+                  /<!-- codex-review-record head=/.test(comment.body || ""),
+                )
+                .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id);
+              const latestReviewRecord = reviewRecords.at(-1);
+              exactCodexRecord =
+                latestReviewRecord?.body?.includes(
+                  "<!-- codex-review-record head=" + pr.head.sha + " base=" + pr.base.sha +
+                  " sig=" + expectedReviewSignature(pr) + " -->",
+                ) === true &&
+                latestReviewRecord?.body?.includes('"state": "success"') === true &&
+                latestReviewRecord?.body?.includes('"decision": "pass"') === true &&
+                latestReviewRecord?.body?.includes('"reviewed_head_sha": "' + pr.head.sha + '"') === true &&
+                latestReviewRecord?.body?.includes('"reviewed_base_sha": "' + pr.base.sha + '"') === true;
+
+              const sameRepository =
+                pr.head.repo?.full_name?.toLowerCase() === (owner + "/" + repo).toLowerCase();
+              const correctMainBase =
+                pr.base.ref === "main" &&
+                pr.base.repo?.full_name?.toLowerCase() === (owner + "/" + repo).toLowerCase();
+              const statuses = hasSubmission && sameRepository && correctMainBase
+                ? await github.paginate(github.rest.repos.listCommitStatusesForRef, {
+                    owner,
+                    repo,
+                    ref: pr.head.sha,
+                    per_page: 100,
+                  })
+                : [];
+              const newestStatusByContext = new Map();
+              for (const status of statuses) {
+                if (!newestStatusByContext.has(status.context)) newestStatusByContext.set(status.context, status);
+              }
+              const codexReview = newestStatusByContext.get("Codex review gate");
+              const codexReviewPassed =
+                codexReview?.state === "success" &&
+                codexReview.description === "PASS base=" + pr.base.sha;
+              const ciPassed = hasSubmission && sameRepository && correctMainBase && await requiredCiPassed(pr);
+
+              const reviewResponse = hasSubmission
+                ? await github.paginate(github.rest.pulls.listReviews, {
+                    owner, repo, pull_number: pr.number, per_page: 100,
+                  })
+                : [];
+              const changesRequested = hasOutstandingChangesRequested(reviewResponse);
+              if (changesRequested && (labels.includes(normalizedReadyLabel) || labels.includes(agentLabel))) {
+                if (labels.includes(normalizedReadyLabel)) {
+                  await github.rest.issues.createComment({
+                    owner, repo, issue_number: pr.number,
+                    body:
+                      "<!-- automerge-invalidation action=changes_requested head=" + pr.head.sha +
+                      " base=" + pr.base.sha + " -->\n" +
+                      "A requested-changes review invalidated admission for this revision.",
+                  });
+                  await removeLabelIfPresent({
+                    owner, repo, issue_number: pr.number, name: readyLabel,
+                  });
+                  labels.splice(labels.indexOf(normalizedReadyLabel), 1);
+                }
+                if (labels.includes(agentLabel)) {
+                  await removeLabelIfPresent({
+                    owner, repo, issue_number: pr.number, name: agentLabel,
+                  });
+                  labels.splice(labels.indexOf(agentLabel), 1);
+                }
+              }
+              const unresolvedThreads = hasSubmission && await hasUnresolvedReviewThreads(pr.node_id);
+              const dependenciesSatisfied =
+                (labels.includes(normalizedReadyLabel) || labels.includes(agentLabel)) &&
+                await dependenciesAreMerged(pr);
+
+              const hasOwnerGate = labels.some((label) => label.startsWith("owner:"));
+              const hasNamedGate = labels.some((label) => gateLabels.has(label));
+              const currentBase = pr.base.sha === mainSha;
+              const notConflictedOrBehind =
+                pr.mergeable !== false &&
+                pr.mergeable_state !== "behind" &&
+                pr.mergeable_state !== "dirty";
+              const ownerAdmitted =
+                labels.includes(normalizedReadyLabel) &&
+                ownerAddedAdmission &&
+                admissionMatchesRevision &&
+                exactCodexRecord;
+              const baseEligible =
+                autoMergeEnabled &&
+                pr.state === "open" &&
+                !pr.draft &&
+                sameRepository &&
+                correctMainBase &&
+                currentBase &&
+                notConflictedOrBehind &&
+                exactCodexRecord &&
+                codexReviewPassed &&
+                ciPassed &&
+                !changesRequested &&
+                !unresolvedThreads &&
+                dependenciesSatisfied &&
+                !hasOwnerGate &&
+                !hasNamedGate;
+              const eligible = baseEligible && ownerAdmitted;
+              const agentSubmissionEligible = baseEligible && agentSubmitted &&
+                !labels.includes(normalizedReadyLabel);
+
+              const autoMerge = await github.graphql(autoMergeQuery, { id: pr.node_id });
+              records.push({
+                pr,
+                labels,
+                submissionHeadSha: pr.head.sha,
+                submissionBaseSha: pr.base.sha,
+                submissionBodyHash: agentSubmissionBodyHash(pr),
+                eligible,
+                agentSubmissionEligible,
+                queued: autoMerge.node?.autoMergeRequest != null,
+                codexReviewPassed,
+                ciPassed,
+                changesRequested,
+                unresolvedThreads,
+                dependenciesSatisfied,
+                hasOwnerGate,
+                hasNamedGate,
+                currentBase,
+                notConflictedOrBehind,
+              });
+            }
+
+            records.sort((a, b) =>
+              Date.parse(a.pr.created_at) - Date.parse(b.pr.created_at) ||
+              a.pr.number - b.pr.number,
+            );
+            const headCounts = new Map();
+            for (const record of records) {
+              const sha = record.pr.head.sha.toLowerCase();
+              headCounts.set(sha, (headCounts.get(sha) || 0) + 1);
+            }
+            for (const record of records) {
+              record.sharedHead = headCounts.get(record.pr.head.sha.toLowerCase()) > 1;
+              if (record.sharedHead) record.eligible = false;
+            }
+            for (const record of records) {
+              if (record.sharedHead || !record.agentSubmissionEligible) continue;
+              const latest = await github.rest.pulls.get({
+                owner, repo, pull_number: record.pr.number,
+              });
+              const live = latest.data;
+              const liveLabels = live.labels.map((label) => label.name.toLowerCase());
+              if (live.state !== "open" || live.draft ||
+                  live.head.sha !== record.submissionHeadSha ||
+                  live.base.sha !== record.submissionBaseSha ||
+                  agentSubmissionBodyHash(live) !== record.submissionBodyHash ||
+                  !liveLabels.includes(agentLabel) || liveLabels.includes(normalizedReadyLabel) ||
+                  liveLabels.some((label) => label.startsWith("owner:") || gateLabels.has(label))) continue;
+              try {
+                record.agentAdmissionRequested = await requestAgentAdmission(
+                  live, record.submissionHeadSha, record.submissionBaseSha,
+                  record.submissionBodyHash,
+                );
+                if (record.agentAdmissionRequested) {
+                  core.info("Submitted agent-reviewed PR #" + live.number + " for signed admission.");
+                }
+              } catch {
+                core.warning("Agent admission label could not be added to #" + live.number + ".");
+              }
+            }
+            const selected = records.find((record) => record.eligible) || null;
+
+            for (const record of records) {
+              const pr = record.pr;
+              const isSelected = selected?.pr.number === pr.number;
+              // Waiting for owner admission is a normal hold, not a failed check.
+              // Pending still blocks the required gate and native auto-merge.
+              let statusState = record.labels.includes(normalizedReadyLabel) ? "failure" : "pending";
+              let description = record.labels.includes(normalizedReadyLabel)
+                ? "Held: owner admission, exact review, base, discussion, or release gates are not satisfied"
+                : record.agentAdmissionRequested
+                  ? "Agent submitted; waiting for signed admission event"
+                  : "Awaiting agent submission, exact review, or CI";
+
+              if (record.sharedHead) {
+                statusState = "failure";
+                description = "Held: multiple open PRs share this head; use distinct commits";
+              }
+
+              if (isSelected) {
+                statusState = "pending";
+                description = autoMergeEnabled
+                  ? "Final live revalidation before enabling auto-merge"
+                  : "Waiting for repository auto-merge safeguards";
+              } else if (
+                autoMergeEnabled &&
+                selected &&
+                record.eligible
+              ) {
+                statusState = "pending";
+                description = "Waiting behind older eligible PR #" + selected.pr.number;
+              } else if (
+                autoMergeEnabled &&
+                !record.sharedHead &&
+                record.labels.includes(normalizedReadyLabel) &&
+                record.codexReviewPassed &&
+                record.ciPassed &&
+                record.currentBase &&
+                record.notConflictedOrBehind &&
+                !record.changesRequested &&
+                !record.unresolvedThreads &&
+                record.dependenciesSatisfied &&
+                !record.hasOwnerGate &&
+                !record.hasNamedGate
+              ) {
+                statusState = "pending";
+                description = "Waiting for an earlier ready pull request";
+              } else if (!record.sharedHead && !autoMergeEnabled && record.labels.includes(normalizedReadyLabel)) {
+                statusState = "pending";
+                description = "Waiting for repository auto-merge safeguards";
+              }
+
+              if (pr.head.repo?.full_name?.toLowerCase() === (owner + "/" + repo).toLowerCase() && pr.base.ref === "main") {
+                await setCoordinatorStatus(pr, statusState, description);
+              }
+
+              if (record.queued && !isSelected) {
+                await github.graphql(
+                  `
+                    mutation($id: ID!) {
+                      disablePullRequestAutoMerge(input: { pullRequestId: $id }) {
+                        pullRequest { number }
+                      }
+                    }
+                  `,
+                  { id: pr.node_id },
+                );
+                core.info("Disabled a stale or out-of-order auto-merge request for #" + pr.number + ".");
+              }
+            }
+
+            if (!selected) {
+              core.info("No admitted PR currently satisfies all coordinator checks.");
+              return;
+            }
+
+            if (!selected.queued) {
+              try {
+                await enableAutoMergeWithIndependentToken(
+                  `
+                    mutation($id: ID!) {
+                      enablePullRequestAutoMerge(input: {
+                      pullRequestId: $id
+                      mergeMethod: SQUASH
+                    }) {
+                      pullRequest {
+                        number
+                        autoMergeRequest { enabledAt }
+                      }
+                    }
+                    }
+                  `,
+                  { id: selected.pr.node_id },
+                );
+              } catch (error) {
+                await setCoordinatorStatus(selected.pr, "failure", "Auto-merge unavailable; verify repository settings");
+                core.setFailed("Could not enable native auto-merge. Confirm the repository setting and token permissions: " + error.message);
+                return;
+              }
+              core.info("Queued only the oldest eligible PR #" + selected.pr.number + ". GitHub waits for every required branch check.");
+            } else {
+              core.info("The oldest eligible PR #" + selected.pr.number + " is already queued; GitHub waits for required branch checks.");
+            }
+
+            const latestPRResponse = await github.rest.pulls.get({
+              owner, repo, pull_number: selected.pr.number,
+            });
+            const latestPR = latestPRResponse.data;
+            const latestMain = await github.rest.git.getRef({ owner, repo, ref: "heads/main" });
+            const latestLabels = latestPR.labels.map((label) => label.name.toLowerCase());
+            const latestStatuses =
+              latestPR.head.repo?.full_name?.toLowerCase() === (owner + "/" + repo).toLowerCase() &&
+              latestPR.base.ref === "main"
+                ? await github.paginate(github.rest.repos.listCommitStatusesForRef, {
+                    owner, repo, ref: latestPR.head.sha, per_page: 100,
+                  })
+                : [];
+            const latestCodexReview = latestStatuses
+              .filter((status) => status.context === "Codex review gate")
+              .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
+            const latestReviewsResponse = await github.paginate(github.rest.pulls.listReviews, {
+              owner, repo, pull_number: selected.pr.number, per_page: 100,
+            });
+            const latestChangesRequested = hasOutstandingChangesRequested(latestReviewsResponse);
+            const latestUnresolvedThreads = await hasUnresolvedReviewThreads(latestPR.node_id);
+            const latestDependenciesSatisfied = await dependenciesAreMerged(latestPR);
+            const latestCiPassed = await requiredCiPassed(latestPR);
+            const latestHasOwnerGate = latestLabels.some((label) => label.startsWith("owner:"));
+            const latestHasNamedGate = latestLabels.some((label) => gateLabels.has(label));
+            const latestComments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: selected.pr.number, per_page: 100,
+            });
+            const latestAdmissionRecord = latestComments
+              .filter((comment) =>
+                comment.user?.login === "github-actions[bot]" &&
+                /<!-- automerge-(admission|invalidation) /.test(comment.body || ""),
+              )
+              .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id)
+              .at(-1);
+            const latestCodexRecord = latestComments
+              .filter((comment) =>
+                comment.user?.login === "github-actions[bot]" &&
+                /<!-- codex-review-record head=/.test(comment.body || ""),
+              )
+              .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id)
+              .at(-1);
+            const latestCodexRecordMatches =
+              latestCodexRecord?.body?.includes(
+                "<!-- codex-review-record head=" + latestPR.head.sha + " base=" + latestPR.base.sha +
+                " sig=" + expectedReviewSignature(latestPR) + " -->",
+              ) === true &&
+              latestCodexRecord?.body?.includes('"state": "success"') === true &&
+              latestCodexRecord?.body?.includes('"decision": "pass"') === true &&
+              latestCodexRecord?.body?.includes('"reviewed_head_sha": "' + latestPR.head.sha + '"') === true &&
+              latestCodexRecord?.body?.includes('"reviewed_base_sha": "' + latestPR.base.sha + '"') === true;
+            const latestTimeline = await github.paginate(github.rest.issues.listEventsForTimeline, {
+              owner, repo, issue_number: selected.pr.number, per_page: 100,
+            });
+            const latestAdmissionEvent = latestTimeline
+              .filter((item) =>
+                ["labeled", "unlabeled"].includes(item.event) &&
+                item.label?.name?.toLowerCase() === normalizedReadyLabel,
+              )
+              .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id)
+              .at(-1);
+            const finalOwnerAdmission =
+              latestAdmissionEvent?.event === "labeled" &&
+              latestAdmissionEvent.actor?.login?.toLowerCase() === owner.toLowerCase();
+            const finalRevalidationPassed =
+              latestPR.state === "open" &&
+              !latestPR.draft &&
+              latestPR.head.repo?.full_name?.toLowerCase() === (owner + "/" + repo).toLowerCase() &&
+              latestPR.base.repo?.full_name?.toLowerCase() === (owner + "/" + repo).toLowerCase() &&
+              latestPR.base.ref === "main" &&
+              latestPR.head.sha === selected.pr.head.sha &&
+              latestPR.base.sha === selected.pr.base.sha &&
+              latestPR.base.sha === latestMain.data.object.sha &&
+              latestPR.mergeable !== false &&
+              latestPR.mergeable_state !== "behind" &&
+              latestPR.mergeable_state !== "dirty" &&
+              latestLabels.includes(normalizedReadyLabel) &&
+              finalOwnerAdmission &&
+              latestCodexReview?.state === "success" &&
+              latestCodexReview.description === "PASS base=" + latestPR.base.sha &&
+              latestCiPassed &&
+              !latestChangesRequested &&
+              !latestUnresolvedThreads &&
+              latestDependenciesSatisfied &&
+              !latestHasOwnerGate &&
+              !latestHasNamedGate &&
+              admissionRecordMatches(latestPR, latestAdmissionEvent, latestAdmissionRecord) &&
+              latestCodexRecordMatches;
+
+            if (!finalRevalidationPassed) {
+              const latestAutoMerge = await github.graphql(autoMergeQuery, { id: latestPR.node_id });
+              if (latestAutoMerge.node?.autoMergeRequest) {
+                await github.graphql(
+                  `
+                    mutation($id: ID!) {
+                      disablePullRequestAutoMerge(input: { pullRequestId: $id }) {
+                        pullRequest { number }
+                      }
+                    }
+                  `,
+                  { id: latestPR.node_id },
+                );
+              }
+              await setCoordinatorStatus(
+                latestPR,
+                "failure",
+                "Held: final live revalidation found a changed revision or gate",
+              );
+              core.warning("Final revalidation failed; auto-merge is disabled for #" + latestPR.number + ".");
+              return;
+            }
+
+            await setCoordinatorStatus(
+              latestPR,
+              "success",
+              "Oldest eligible PR; exact head/base and owner gates revalidated",
+            );
+            core.info("Final live revalidation passed for #" + latestPR.number + "; coordinator gate is green.");
