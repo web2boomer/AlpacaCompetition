@@ -105,3 +105,11 @@ When this project uses a database, first check its existing local instance and r
 
 - Use **AOB Workspace** for Render work. Do not ask which Render workspace to use each time. Verify the service before changing it; workspace selection alone does not authorize a production change.
 - Push completed task branches and open or update their PRs without asking for push permission. When the work, required checks, and independent review are complete, mark the PR **Ready for review**. Do not leave a ready PR in draft. Merge in dependency order after the final gate recheck; do not self-approve.
+
+## Personal reminders and owner-action issues
+
+Treat personal reminders and owner-action issues as Alex's task list. Do not
+close, unassign, or consolidate them during backlog cleanup. Close them only
+when Alex confirms completion or the specific completion criteria have been
+verified, and record that evidence in the issue. If completion is uncertain,
+leave the issue open and preserve its assignment.
